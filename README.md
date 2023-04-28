@@ -1,2 +1,2 @@
-# DBRC-DBS3
-Density-Based Residue Clustering by Dissimilarity Between Sequence SubSets (DBRC/DBS3).
+# ProtLearn
+ProtLearn brings together Machine Learn and Bioinformatics.
