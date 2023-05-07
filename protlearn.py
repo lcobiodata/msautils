@@ -113,7 +113,8 @@ class MSA(object):
                     collection[m].append(Residue(self, ab, m, sequence_indices))
         if plus_aa:
             for m in range(
-                    self.length):  # For each column of the alignment, it looks for all possible subsets of similar amino acids.
+                    self.length):  # For each column of the alignment, it looks for all possible subsets of similar
+                # amino acids.
                 tmp = {}
                 for k, v in list(self.sthereochemistry.items()):
                     if len(set(self.sequences[:, m]) & set(v)) > 0:
@@ -155,14 +156,24 @@ class Subset(object):
     class Probability:
         def __init__(self, subset):
             self.subset = subset
-            self.result = float(sum(map(lambda x: self.subset.msa.weights[x], self.subset.sequence_indices)))
+            self.result = float(
+                sum(
+                    map(lambda x: self.subset.msa.weights[x], self.subset.sequence_indices)
+                )
+            )
 
         def __call__(self):
             return self.result
 
         def given(self, other_subset):
-            return float(sum(map(lambda x: self.subset.msa.weights[x],
-                                 self.subset.sequence_indices & other_subset.sequence_indices))) / other_subset.p()
+            result = float(
+                sum(
+                    map(
+                        lambda x: self.subset.msa.weights[x],
+                        self.subset.sequence_indices & other_subset.sequence_indices
+                    )
+                )
+            ) / other_subset.p()
 
 
 class Residue(Subset):
@@ -254,7 +265,7 @@ if __name__ == "__main__":
     # #====================================================================================================
     N = sorted(G.nodes(), key=lambda x: x.p(), reverse=True)
     # #====================================================================================================
-    D = nx.to_numpy_matrix(G, nodelist=N)
+    D = nx.to_numpy_array(G, nodelist=N)
     # #====================================================================================================
     optics_instance = optics(D, args.max_dist, args.min_size, None, 'distance_matrix')
     optics_instance.process()
