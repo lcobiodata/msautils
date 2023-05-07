@@ -213,8 +213,8 @@ def get_newick(node, newick, parent_dist, leaf_names):
         return newick
 
 
-def get_df(data, row_indices, column_indices):
-    dic = {'Seq. ID': [msa.headers[ri] for ri in row_indices]}
+def get_df(data, msa_obj, row_indices, column_indices):
+    dic = {'Seq. ID': [msa_obj.headers[ri] for ri in row_indices]}
     for idx in column_indices:
         dic['Clust. %d' % (idx + 1)] = data[:, idx]
     return pd.DataFrame(dic)
