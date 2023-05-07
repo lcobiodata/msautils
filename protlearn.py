@@ -40,7 +40,7 @@ sns.set(color_codes=True)
 class MSA(object):
     """A class representing a Multiple Sequence Alignment"""
 
-    def __init__(self, msa_file):
+    def __init__(self, msa_file, expand_alphabet=False):
         super(MSA, self).__init__()
         self.alphabet = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W',
                          'Y']
@@ -69,7 +69,7 @@ class MSA(object):
         self.size, self.length = array(self.sequences).shape
         self.weights = self.henikoff()
         self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
-        self.collection = self.collect()
+        self.collection = self.collect(expand_alphabet)
 
     @staticmethod
     def parse(msa_file):
@@ -100,7 +100,7 @@ class MSA(object):
             weights.append(sum(matrix_row) / float(self.length))
         return weights
 
-    def collect(self, plus_aa=False):
+    def collect(self, expand_alphabet=False):
         collection = {}
         for m in range(self.length):
             collection[m] = []
@@ -111,32 +111,41 @@ class MSA(object):
                         if self.sequences[n][m] == ab:
                             sequence_indices.append(n)
                     collection[m].append(Residue(self, ab, m, sequence_indices))
-        if plus_aa:
-            for m in range(
-                    self.length):  # For each column of the alignment, it looks for all possible subsets of similar
-                # amino acids.
+        if expand_alphabet:
+            for m in range(self.length):
+                """For each column of the alignment, it looks for all possible subsets of 
+                similar amino acids."""
                 tmp = {}
-                for k, v in list(self.sthereochemistry.items()):
+                for k, v in self.sthereochemistry.items():
                     if len(set(self.sequences[:, m]) & set(v)) > 0:
                         tmp[k] = ([], [])
                 for n in range(self.size):
-                    for k in list(tmp.keys()):
+                    for k in tmp.keys():
                         if self.sequences[n][m] in self.sthereochemistry[k]:
                             if self.sequences[n][m] not in tmp[k][0]:
                                 tmp[k][0].append(self.sequences[n][m])
                             tmp[k][1].append(n)
-                for k, (x, y) in list(tmp.items()):
+                for k, (x, y) in tmp.items():
                     tmp[k] = (tuple(x), tuple(y))
                 aux = {x: [] for x in set(tmp.values())}
-                for k, v in list(tmp.items()):
+                for k, v in tmp.items():
                     aux[v].append(k)
-                for (aa, idx), ftr in list(aux.items()):
+                for (aa, idx), ftr in aux.items():
                     if len(aa) > 1:
                         for f in range(len(ftr)):
                             if 'Similar' in ftr[f]:
                                 ftr[f] = 'Similar'
                         label = ', '.join(ftr)
-                        collection[m].append(Residue(self, list(aa), m, list(idx), label))
+                        collection[m].append(
+                            Residue(
+                                self,
+                                amino_acid=list(aa),
+                                position=m,
+                                sequence_indices=list(idx),
+                                label=label,
+                                sthereochemistry=ftr
+                            )
+                        )
         return collection
 
 
@@ -174,6 +183,7 @@ class Subset(object):
                     )
                 )
             ) / other_subset.p()
+            return result
 
 
 class Residue(Subset):
@@ -231,7 +241,7 @@ if __name__ == "__main__":
                         default=None, required=False)
     parser.add_argument("-f", "--min_freq", help="Threshold for minimum residue frequency (default: 0.0).", type=float,
                         default=0., required=False)
-    parser.add_argument("-x", "--plus_aa", help="True for expanding alphabet (default: False).", type=bool,
+    parser.add_argument("-x", "--expand_alphabet", help="True for expanding alphabet (default: False).", type=bool,
                         default=False,
                         required=False)
     parser.add_argument("-d", "--max_dist", help="Maximum distance to reach points (default: 1.0).", type=float,
@@ -258,7 +268,6 @@ if __name__ == "__main__":
         if a.p() >= args.min_freq:
             for b in R[i + 1:]:
                 if b.p() >= args.min_freq:
-                    # G.add_edge(a, b, weight = 1. - float(sum(map(lambda x: msa.weights[x], a.sequence_indices&b.sequence_indices))) / float(sum(map(lambda x: msa.weights[x], a.sequence_indices|b.sequence_indices))))
                     G.add_edge(a, b, weight=float(
                         sum(map(lambda x: msa.weights[x], a.sequence_indices ^ b.sequence_indices))) / float(
                         sum(map(lambda x: msa.weights[x], a.sequence_indices | b.sequence_indices))))
@@ -330,7 +339,7 @@ if __name__ == "__main__":
     with open('%s_dendrogram.nwk' % args.out, 'w') as outfile:
         outfile.write(get_newick(tree, "", tree.dist, msa.headers))
     # #====================================================================================================
-    df = get_df(H, range(msa.size), range(len(clusters)))
+    df = get_df(H, msa, range(msa.size), range(len(clusters)))
     seq = df.pop('Seq. ID')
     try:
         g = sns.clustermap(df)
@@ -340,7 +349,7 @@ if __name__ == "__main__":
     col_idx = g.dendrogram_col.reordered_ind
     H = [H[i] for i in row_idx]
     H = array(H)
-    df = get_df(H, row_idx, col_idx)
+    df = get_df(H, msa, row_idx, col_idx)
     df.to_csv('%s_seq_adhesion.csv' % args.out)
     plt.savefig('%s_seq_adhesion.png' % args.out)
     # #====================================================================================================
