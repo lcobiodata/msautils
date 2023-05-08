@@ -34,13 +34,14 @@ import pandas as pd
 import seaborn as sns
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 from Bio.SeqUtils import seq3
+
 sns.set(color_codes=True)
 
 
 class MSA(object):
     """A class representing a Multiple Sequence Alignment"""
 
-    def __init__(self, msa_file, expand_alphabet=False):
+    def __init__(self, msa_file):
         super(MSA, self).__init__()
         self.alphabet = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W',
                          'Y']
@@ -65,11 +66,13 @@ class MSA(object):
             'With sulfur': ['C', 'M']
         }
         self.data = self.parse(msa_file)
-        self.headers, self.sequences = self.read()
-        self.size, self.length = array(self.sequences).shape
-        self.weights = self.henikoff()
-        self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
-        self.collection = self.collect(expand_alphabet)
+        self.size = len(self.data)
+        self.length = None
+        self.headers = None
+        self.sequences = None
+        self.sequence_indices = None
+        self.weights = None
+        self.collection = None
 
     @staticmethod
     def parse(msa_file):
@@ -78,12 +81,30 @@ class MSA(object):
         except FileNotFoundError:
             raise SystemExit("No such file or directory: '%s'" % msa_file)
 
-    def read(self) -> Tuple[list, array]:
+    def read(self):
         headers, sequences = [], []
         for x in self.data:
             headers.append(x.id)
             sequences.append(x.seq)
-        return headers, array(sequences)
+        self.headers, self.sequences = headers, array(sequences)
+
+    def get_seq_indices(self):
+        if self.headers is not None:
+            self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
+
+    def get_shape(self):
+        if self.sequences is not None:
+            aligned = True
+            i = 0
+            n = len(self.data)
+            while i < n - 1 and aligned:
+                if len(self.sequences[i]) != len(self.sequences[i + 1]):
+                    aligned = False
+                i += 1
+            if aligned:
+                self.size, self.length = array(self.sequences).shape
+            else:
+                self.size, self.length = array(n, None)
 
     def henikoff(self):
         weights = []
@@ -98,7 +119,7 @@ class MSA(object):
                         n += 1.
                 matrix_row.append(1. / (k * n))
             weights.append(sum(matrix_row) / float(self.length))
-        return weights
+        self.weights = weights
 
     def collect(self, expand_alphabet=False):
         collection = {}
@@ -146,7 +167,7 @@ class MSA(object):
                                 sthereochemistry=ftr
                             )
                         )
-        return collection
+        self.collection = collection
 
 
 class Subset(object):
