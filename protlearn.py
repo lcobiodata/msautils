@@ -86,7 +86,7 @@ class MSA(object):
         for x in self.data:
             headers.append(x.id)
             sequences.append(x.seq)
-        self.headers, self.sequences = headers, array(sequences)
+        self.headers, self.sequences = headers, sequences#array(sequences)
 
     def get_seq_indices(self):
         if self.headers is not None:
@@ -104,7 +104,7 @@ class MSA(object):
             if aligned:
                 self.size, self.length = array(self.sequences).shape
             else:
-                self.size, self.length = array(n, None)
+                self.size, self.length = n, None
 
     def henikoff(self):
         weights = []
@@ -112,9 +112,10 @@ class MSA(object):
             matrix_row = []
             for col_index in range(self.length):
                 x = self.sequences[seq_index][col_index]
-                k = float(len(set(array(self.sequences)[:, col_index])))
+                aux = array(self.sequences)[:, col_index]
+                k = float(len(set(aux)))
                 n = 0.
-                for y in self.sequences[:, col_index]:
+                for y in aux:
                     if y == x:
                         n += 1.
                 matrix_row.append(1. / (k * n))
