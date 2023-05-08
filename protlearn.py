@@ -20,7 +20,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>."""
 
-from numpy import array, mean, sum, unique, newaxis
+import numpy as np
 from typing import Tuple
 import argparse
 from Bio import SeqIO
@@ -66,12 +66,17 @@ class MSA(object):
             'With sulfur': ['C', 'M']
         }
         self.data = self.parse(msa_file)
-        self.size = len(self.data)
-        self.length = None
+        # self.headers, self.sequences = self.read()
+        # self.size, self.length = np.array(self.sequences).shape
+        # self.weights = self.henikoff()
+        # self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
+        # self.collection = self.collect()
         self.headers = None
         self.sequences = None
-        self.sequence_indices = None
+        self.size = None
+        self.length = None
         self.weights = None
+        self.sequence_indices = None
         self.collection = None
 
     @staticmethod
@@ -81,88 +86,71 @@ class MSA(object):
         except FileNotFoundError:
             raise SystemExit("No such file or directory: '%s'" % msa_file)
 
-    def read(self):
+    def read(self):  # -> Tuple[list, np.array]:
         headers, sequences = [], []
         for x in self.data:
             headers.append(x.id)
             sequences.append(x.seq)
-        self.headers, self.sequences = headers, sequences  # array(sequences)
-
-    def get_seq_indices(self):
-        if self.headers is not None:
-            self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
-
-    def get_shape(self):
-        if self.sequences is not None:
-            aligned = True
-            i = 0
-            n = len(self.data)
-            while i < n - 1 and aligned:
-                if len(self.sequences[i]) != len(self.sequences[i + 1]):
-                    aligned = False
-                i += 1
-            if aligned:
-                self.size, self.length = array(self.sequences).shape
-            else:
-                self.size, self.length = n, None
+        # return headers, np.array(sequences)
+        self.headers, self.sequences = headers, np.array(sequences)
+        self.size, self.length = self.sequences.shape
+        self.sequence_indices = {x: n for n, x in enumerate(self.headers)}
 
     def henikoff(self):
         weights = []
-        for col_index in range(self.length):
-            print(col_index)
-            aux = array(self.sequences)[:, col_index]
-            k = len(unique(aux))
-            n = sum(aux[:, newaxis] == aux[newaxis, :], axis=0)
-            matrix_row = 1. / (k * n)
-            weights.append(mean(matrix_row))
+        for seq_index in range(self.size):
+            matrix_row = []
+            for col_index in range(self.length):
+                print(seq_index, col_index)
+                x = self.sequences[seq_index][col_index]
+                k = float(len(set(np.array(self.sequences)[:, col_index])))
+                n = 0.
+                for y in self.sequences[:, col_index]:
+                    if y == x:
+                        n += 1.
+                matrix_row.append(1. / (k * n))
+            weights.append(sum(matrix_row) / float(self.length))
+        # return weights
         self.weights = weights
 
-    def collect(self, expand_alphabet=False):
+    def collect(self, plus_aa=False):
         collection = {}
         for m in range(self.length):
             collection[m] = []
             for ab in self.alphabet:
-                if ab in array(self.sequences)[:, m]:
+                if ab in self.sequences[:, m]:
                     sequence_indices = []
                     for n in range(self.size):
                         if self.sequences[n][m] == ab:
                             sequence_indices.append(n)
                     collection[m].append(Residue(self, ab, m, sequence_indices))
-        if expand_alphabet:
-            for m in range(self.length):
-                """For each column of the alignment, it looks for all possible subsets of 
-                similar amino acids."""
+        if plus_aa:
+            for m in range(
+                    self.length):  # For each column of the alignment, it looks for all possible subsets of similar
+                # amino acids.
                 tmp = {}
-                for k, v in self.sthereochemistry.items():
+                for k, v in list(self.sthereochemistry.items()):
                     if len(set(self.sequences[:, m]) & set(v)) > 0:
                         tmp[k] = ([], [])
                 for n in range(self.size):
-                    for k in tmp.keys():
+                    for k in list(tmp.keys()):
                         if self.sequences[n][m] in self.sthereochemistry[k]:
                             if self.sequences[n][m] not in tmp[k][0]:
                                 tmp[k][0].append(self.sequences[n][m])
                             tmp[k][1].append(n)
-                for k, (x, y) in tmp.items():
+                for k, (x, y) in list(tmp.items()):
                     tmp[k] = (tuple(x), tuple(y))
                 aux = {x: [] for x in set(tmp.values())}
-                for k, v in tmp.items():
+                for k, v in list(tmp.items()):
                     aux[v].append(k)
-                for (aa, idx), ftr in aux.items():
+                for (aa, idx), ftr in list(aux.items()):
                     if len(aa) > 1:
                         for f in range(len(ftr)):
                             if 'Similar' in ftr[f]:
                                 ftr[f] = 'Similar'
                         label = ', '.join(ftr)
-                        collection[m].append(
-                            Residue(
-                                self,
-                                amino_acid=list(aa),
-                                position=m,
-                                sequence_indices=list(idx),
-                                label=label,
-                                sthereochemistry=ftr
-                            )
-                        )
+                        collection[m].append(Residue(self, list(aa), m, list(idx), ftr, label))
+        # return collection
         self.collection = collection
 
 
@@ -182,25 +170,14 @@ class Subset(object):
     class Probability:
         def __init__(self, subset):
             self.subset = subset
-            self.result = float(
-                sum(
-                    map(lambda x: self.subset.msa.weights[x], self.subset.sequence_indices)
-                )
-            )
+            self.result = float(sum(map(lambda x: self.subset.msa.weights[x], self.subset.sequence_indices)))
 
         def __call__(self):
             return self.result
 
         def given(self, other_subset):
-            result = float(
-                sum(
-                    map(
-                        lambda x: self.subset.msa.weights[x],
-                        self.subset.sequence_indices & other_subset.sequence_indices
-                    )
-                )
-            ) / other_subset.p()
-            return result
+            return float(sum(map(lambda x: self.subset.msa.weights[x],
+                                 self.subset.sequence_indices & other_subset.sequence_indices))) / other_subset.p()
 
 
 class Residue(Subset):
@@ -240,8 +217,8 @@ def get_newick(node, newick, parent_dist, leaf_names):
         return newick
 
 
-def get_df(data, msa_obj, row_indices, column_indices):
-    dic = {'Seq. ID': [msa_obj.headers[ri] for ri in row_indices]}
+def get_df(data, row_indices, column_indices):
+    dic = {'Seq. ID': [msa.headers[ri] for ri in row_indices]}
     for idx in column_indices:
         dic['Clust. %d' % (idx + 1)] = data[:, idx]
     return pd.DataFrame(dic)
@@ -258,7 +235,7 @@ if __name__ == "__main__":
                         default=None, required=False)
     parser.add_argument("-f", "--min_freq", help="Threshold for minimum residue frequency (default: 0.0).", type=float,
                         default=0., required=False)
-    parser.add_argument("-x", "--expand_alphabet", help="True for expanding alphabet (default: False).", type=bool,
+    parser.add_argument("-x", "--plus_aa", help="True for expanding alphabet (default: False).", type=bool,
                         default=False,
                         required=False)
     parser.add_argument("-d", "--max_dist", help="Maximum distance to reach points (default: 1.0).", type=float,
@@ -285,13 +262,16 @@ if __name__ == "__main__":
         if a.p() >= args.min_freq:
             for b in R[i + 1:]:
                 if b.p() >= args.min_freq:
+                    # G.add_edge(a, b, weight = 1. - float(sum(map(lambda x: msa.weights[x],
+                    # a.sequence_indices&b.sequence_indices))) / float(sum(map(lambda x: msa.weights[x],
+                    # a.sequence_indices|b.sequence_indices))))
                     G.add_edge(a, b, weight=float(
                         sum(map(lambda x: msa.weights[x], a.sequence_indices ^ b.sequence_indices))) / float(
                         sum(map(lambda x: msa.weights[x], a.sequence_indices | b.sequence_indices))))
     # #====================================================================================================
     N = sorted(G.nodes(), key=lambda x: x.p(), reverse=True)
     # #====================================================================================================
-    D = nx.to_numpy_array(G, nodelist=N)
+    D = nx.to_numpy_matrix(G, nodelist=N)
     # #====================================================================================================
     optics_instance = optics(D, args.max_dist, args.min_size, None, 'distance_matrix')
     optics_instance.process()
@@ -306,7 +286,7 @@ if __name__ == "__main__":
     plt.ylabel('Reachability Distance')
     plt.savefig('%s_reachability_plot.png' % args.out)
     # #====================================================================================================
-    clusters = sorted(clusters, key=lambda x: mean(list(map(lambda y: N[y].p(), x))), reverse=True)
+    clusters = sorted(clusters, key=lambda x: np.mean(list(map(lambda y: N[y].p(), x))), reverse=True)
     i = 0
     while i < len(clusters):
         positions = set(map(lambda x: N[x].position, clusters[i]))
@@ -346,17 +326,17 @@ if __name__ == "__main__":
                     count += 1
             row.append(float(count) / float(len(clusters[j])))
         H.append(row)
-    H = array(H)
+    H = np.array(H)
     # #====================================================================================================
     Z = linkage(H, 'average')
     fig = plt.figure(figsize=(25, 10))
-    dn = dendrogram(Z, labels=array(msa.headers))
+    dn = dendrogram(Z, labels=np.array(msa.headers))
     plt.savefig('%s_dendrogram.png' % args.out)
     tree = to_tree(Z, False)
     with open('%s_dendrogram.nwk' % args.out, 'w') as outfile:
         outfile.write(get_newick(tree, "", tree.dist, msa.headers))
     # #====================================================================================================
-    df = get_df(H, msa, range(msa.size), range(len(clusters)))
+    df = get_df(H, range(msa.size), range(len(clusters)))
     seq = df.pop('Seq. ID')
     try:
         g = sns.clustermap(df)
@@ -365,8 +345,8 @@ if __name__ == "__main__":
     row_idx = g.dendrogram_row.reordered_ind
     col_idx = g.dendrogram_col.reordered_ind
     H = [H[i] for i in row_idx]
-    H = array(H)
-    df = get_df(H, msa, row_idx, col_idx)
+    H = np.array(H)
+    df = get_df(H, row_idx, col_idx)
     df.to_csv('%s_seq_adhesion.csv' % args.out)
     plt.savefig('%s_seq_adhesion.png' % args.out)
     # #====================================================================================================
@@ -377,7 +357,7 @@ if __name__ == "__main__":
     clf = PCA(n_components=2)
     pts = clf.fit_transform(pts)
     # #====================================================================================================
-    colors = array(list(map(lambda x: x.p(), N))) * 100
+    colors = np.array(list(map(lambda x: x.p(), N))) * 100
     fig = plt.figure()
     X, Y = zip(*pts)
     sc = plt.scatter(X, Y, c=colors, cmap='rainbow', vmin=0., vmax=100., alpha=.5)
@@ -391,7 +371,7 @@ if __name__ == "__main__":
         if i not in noise:
             points.append(p)
             colors.append(c)
-    colors = array(colors) * 100
+    colors = np.array(colors) * 100
     fig = plt.figure()
     X, Y = zip(*points)
     sc = plt.scatter(X, Y, c=colors, cmap='rainbow', vmin=0., vmax=100., alpha=0.5)
