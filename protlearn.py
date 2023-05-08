@@ -20,7 +20,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>."""
 
-from numpy import array, mean
+from numpy import array, mean, sum, unique, newaxis
 from typing import Tuple
 import argparse
 from Bio import SeqIO
@@ -86,7 +86,7 @@ class MSA(object):
         for x in self.data:
             headers.append(x.id)
             sequences.append(x.seq)
-        self.headers, self.sequences = headers, sequences#array(sequences)
+        self.headers, self.sequences = headers, sequences  # array(sequences)
 
     def get_seq_indices(self):
         if self.headers is not None:
@@ -108,18 +108,13 @@ class MSA(object):
 
     def henikoff(self):
         weights = []
-        for seq_index in range(self.size):
-            matrix_row = []
-            for col_index in range(self.length):
-                x = self.sequences[seq_index][col_index]
-                aux = array(self.sequences)[:, col_index]
-                k = float(len(set(aux)))
-                n = 0.
-                for y in aux:
-                    if y == x:
-                        n += 1.
-                matrix_row.append(1. / (k * n))
-            weights.append(sum(matrix_row) / float(self.length))
+        for col_index in range(self.length):
+            print(col_index)
+            aux = array(self.sequences)[:, col_index]
+            k = len(unique(aux))
+            n = sum(aux[:, newaxis] == aux[newaxis, :], axis=0)
+            matrix_row = 1. / (k * n)
+            weights.append(mean(matrix_row))
         self.weights = weights
 
     def collect(self, expand_alphabet=False):
@@ -127,7 +122,7 @@ class MSA(object):
         for m in range(self.length):
             collection[m] = []
             for ab in self.alphabet:
-                if ab in self.sequences[:, m]:
+                if ab in array(self.sequences)[:, m]:
                     sequence_indices = []
                     for n in range(self.size):
                         if self.sequences[n][m] == ab:
