@@ -41,8 +41,10 @@ sns.set(color_codes=True)
 class MSA(object):
     """A class representing a Multiple Sequence Alignment"""
 
-    def __init__(self, msa_file):
+    def __init__(self, msa_file, msa_format="fasta"):
         super(MSA, self).__init__()
+        self.msa_file = msa_file
+        self.msa_format = msa_format
         self.alphabet = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W',
                          'Y']
         self.sthereochemistry = {
@@ -65,7 +67,7 @@ class MSA(object):
             'With hydroxyl': ['S', 'T', 'Y'],
             'With sulfur': ['C', 'M']
         }
-        self.data = self.parse(msa_file)
+        self.data = self.parse()
         # self.headers, self.sequences = self.read()
         # self.size, self.length = np.array(self.sequences).shape
         # self.weights = self.henikoff()
@@ -79,12 +81,11 @@ class MSA(object):
         self.sequence_indices = None
         self.collection = None
 
-    @staticmethod
-    def parse(msa_file):
+    def parse(self):
         try:
-            return list(SeqIO.parse(msa_file, "fasta"))
+            return list(SeqIO.parse(self.msa_file, self.msa_format))
         except FileNotFoundError:
-            raise SystemExit("No such file or directory: '%s'" % msa_file)
+            raise SystemExit("No such file or directory: '%s'" % self.msa_file)
 
     def read(self):  # -> Tuple[list, np.array]:
         headers, sequences = [], []
