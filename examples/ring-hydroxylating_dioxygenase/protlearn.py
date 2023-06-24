@@ -146,7 +146,7 @@ def cached_property(method):
 
 class MSA(pd.DataFrame):
 
-    def __init__(self, plot=False, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.msa_file = None
         self.raw_data = None
@@ -154,13 +154,10 @@ class MSA(pd.DataFrame):
         self.alphabet = None
         self.analysis = None
         self.coordinates = None
-        self.analyse(plot=plot)
-        self.reduce()
-        self.labels = self.get_labels(self.coordinates, plot=plot)
+        self.labels = None
         self.sorted_importance = None
         self.selected_features = None
         self.clusters = None
-        self.process(plot=plot)
 
     def parse_msa_file(self, msa_file, msa_format="fasta", *args, **kwargs):
         self.msa_file = msa_file
@@ -169,18 +166,6 @@ class MSA(pd.DataFrame):
             headers.append(record.id)
             sequences.append(record.seq)
         self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
-
-    def process(self, plot=False):
-        """
-        :return:
-        """
-        # Perform MCA
-        self.analyse()
-        self.reduce()
-        # Select most important features
-        self.select_features(plot=plot)
-        # Get cluster and sequence labels
-        self.get_clusters(plot=plot)
 
     def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
         """
@@ -232,12 +217,11 @@ class MSA(pd.DataFrame):
         # Get the row coordinates
         self.coordinates = self.analysis.transform(self.data)
 
-    @staticmethod
-    def get_labels(coordinates, plot=False):
+    def get_labels(self, plot=False):
         """
         :return:
         """
-        coordinates = np.array(coordinates)
+        coordinates = np.array(self.coordinates)
         # Define a range of potential number of clusters to evaluate
         min_clusters = 3
         max_clusters = 10
@@ -264,7 +248,7 @@ class MSA(pd.DataFrame):
             plt.title('Scatter Plot - Clusters')
             plt.legend()
             plt.show()
-        return kmeans.labels_
+        self.labels = kmeans.labels_
 
     @staticmethod
     def henikoff(data):
@@ -342,7 +326,7 @@ class MSA(pd.DataFrame):
         :return:
         """
         # Perform feature selection on data
-        self.select_features(self.data)
+        self.select_features()
         # Calculate cumulative sum of importance
         cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
         # Find the index where cumulative importance exceeds or equals 0.9
@@ -531,7 +515,7 @@ class MSA(pd.DataFrame):
                                cbar_pos=(.4, .9, .4, .02), cbar_kws=cbar_kws, figsize=(5, 5))
             # Show the plot
             plt.show()
-        self.clusters = clusters
+        self.clusters = {label:cluster for label, cluster in zip(unique_labels, clusters)}
         self.labels = sequence_labels
 
     def bootstrap(self):
