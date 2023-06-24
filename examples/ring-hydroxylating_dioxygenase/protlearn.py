@@ -129,10 +129,10 @@ def get_newick(node, parent_dist, leaf_names, newick=""):
         return newick
 
 
-def write_dendrogram(linkage_object, prefix):
+def write_dendrogram(linkage_object, headers, prefix='output'):
     tree = to_tree(linkage_object, False)
     with open(f'{prefix}_dendrogram.nwk', 'w') as outfile:
-        outfile.write(get_newick(tree, "", tree.dist, msa.headers))
+        outfile.write(get_newick(tree, "", tree.dist, headers))
 
 
 def cached_property(method):
@@ -144,54 +144,23 @@ def cached_property(method):
     return wrapper
 
 
-def get_labels(coordinates, plot=False):
-    """
-    :return:
-    """
-    coordinates = np.array(coordinates)
-    # Define a range of potential number of clusters to evaluate
-    min_clusters = 3
-    max_clusters = 10
-    # Perform clustering for different number of clusters and compute silhouette scores
-    silhouette_scores = []
-    for k in range(min_clusters, max_clusters + 1):
-        kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
-        kmeans.fit(coordinates)
-        labels = kmeans.labels_
-        score = silhouette_score(coordinates, labels)
-        silhouette_scores.append(score)
-    # Find the best number of clusters based on the highest silhouette score
-    best_num_clusters = np.argmax(silhouette_scores) + min_clusters
-    # Perform clustering with the best number of clusters
-    kmeans = KMeans(n_clusters=best_num_clusters, n_init=10)  # Set n_init explicitly
-    kmeans.fit(coordinates)
-    if plot:
-        cluster_centers = kmeans.cluster_centers_
-        # Plot the scatter plot colored by clusters
-        plt.scatter(coordinates[:, 0], coordinates[:, 1], c=kmeans.labels_, cmap='viridis')
-        plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='red', marker='x', label='Cluster Centers')
-        plt.xlabel('Dimension 1')
-        plt.ylabel('Dimension 2')
-        plt.title('Scatter Plot - Clusters')
-        plt.legend()
-        plt.show()
-    return kmeans.labels_
-
-
 class MSA(pd.DataFrame):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, plot=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.msa_file = None
+        self.raw_data = None
         self.data = None
         self.alphabet = None
-        self.clean = None
         self.analysis = None
         self.coordinates = None
-        self.labels = None
+        self.analyse(plot=plot)
+        self.reduce()
+        self.labels = self.get_labels(self.coordinates, plot=plot)
         self.sorted_importance = None
         self.selected_features = None
         self.clusters = None
+        self.process(plot=plot)
 
     def parse_msa_file(self, msa_file, msa_format="fasta", *args, **kwargs):
         self.msa_file = msa_file
@@ -199,18 +168,30 @@ class MSA(pd.DataFrame):
         for record in SeqIO.parse(self.msa_file, msa_format, *args, **kwargs):
             headers.append(record.id)
             sequences.append(record.seq)
-        self.data = pd.DataFrame(np.array(sequences), index=headers)
+        self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
 
-    def remove_spurious(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
+    def process(self, plot=False):
+        """
+        :return:
+        """
+        # Perform MCA
+        self.analyse()
+        self.reduce()
+        # Select most important features
+        self.select_features(plot=plot)
+        # Get cluster and sequence labels
+        self.get_clusters(plot=plot)
+
+    def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
         """
         :return:
         """
         to_remove = [indel]
         if remove_lowercase:
-            clean = self.data.copy()
+            clean = self.raw_data.copy()
             to_remove += [chr(i) for i in range(ord('a'), ord('z') + 1)]
         else:
-            clean = self.data.applymap(str.upper).copy()
+            clean = self.raw_data.applymap(str.upper).copy()
         clean.replace(to_remove, np.nan, inplace=True)
         min_rows = int(threshold * clean.shape[0])
         # Remove columns with NaN values above the threshold
@@ -223,27 +204,23 @@ class MSA(pd.DataFrame):
             sns.heatmap(clean.isna().astype(int), cmap='binary', xticklabels=False, yticklabels=False, cbar=False)
             # Show the plot
             plt.show()
-        self.clean = clean.reset_index(drop=True) \
+        self.data = clean.reset_index(drop=True) \
             .drop_duplicates() \
             .fillna('-') \
             .copy()
 
-    def analyse(self, data=None, plot=False, *args, **kargs):
+    def analyse(self, plot=False, *args, **kargs):
         """
         :return:
         """
         # Perform MCA
         mca = MCA(*args, **kargs)
-        if data is None:
-            if self.clean is None:
-                self.remove_spurious()
-            data = self.clean
-        mca.fit(data)
+        mca.fit(self.data)
         if plot:
             try:
                 # Plot together the scatter plot of both sequences and residues overlaid
                 mca.plot(
-                    data,
+                    self.data,
                     x_component=0,
                     y_component=1
                 )
@@ -251,23 +228,49 @@ class MSA(pd.DataFrame):
                 pass
         self.analysis = mca
 
-    def reduce(self, data=None):
-        if data is None:
-            if self.clean is None:
-                self.remove_spurious()
-            data = self.clean
-        if self.analysis is None:
-            self.analyse(data)
+    def reduce(self):
         # Get the row coordinates
-        self.coordinates = self.analysis.transform(data)
+        self.coordinates = self.analysis.transform(self.data)
 
-    def henikoff(self, data=None):
+    @staticmethod
+    def get_labels(coordinates, plot=False):
         """
-        :param data: The data to process. If None, self.data will be used.
+        :return:
+        """
+        coordinates = np.array(coordinates)
+        # Define a range of potential number of clusters to evaluate
+        min_clusters = 3
+        max_clusters = 10
+        # Perform clustering for different number of clusters and compute silhouette scores
+        silhouette_scores = []
+        for k in range(min_clusters, max_clusters + 1):
+            kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
+            kmeans.fit(coordinates)
+            labels = kmeans.labels_
+            score = silhouette_score(coordinates, labels)
+            silhouette_scores.append(score)
+        # Find the best number of clusters based on the highest silhouette score
+        best_num_clusters = np.argmax(silhouette_scores) + min_clusters
+        # Perform clustering with the best number of clusters
+        kmeans = KMeans(n_clusters=best_num_clusters, n_init=10)  # Set n_init explicitly
+        kmeans.fit(coordinates)
+        if plot:
+            cluster_centers = kmeans.cluster_centers_
+            # Plot the scatter plot colored by clusters
+            plt.scatter(coordinates[:, 0], coordinates[:, 1], c=kmeans.labels_, cmap='viridis')
+            plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='red', marker='x', label='Cluster Centers')
+            plt.xlabel('Dimension 1')
+            plt.ylabel('Dimension 2')
+            plt.title('Scatter Plot - Clusters')
+            plt.legend()
+            plt.show()
+        return kmeans.labels_
+
+    @staticmethod
+    def henikoff(data):
+        """
         :return: A pandas Series containing the calculated weights.
         """
-        if data is None:
-            data = self.clean
         data_array = data.to_numpy()  # Convert DataFrame to NumPy array
         size, length = data_array.shape
         weights = []
@@ -279,21 +282,12 @@ class MSA(pd.DataFrame):
             weights.append(np.sum(matrix_row) / length)
         return pd.Series(weights, index=data.index)
 
-    def select_features(self, data, labels, plot=False):
-        if data is None:
-            if self.clean is None:
-                self.remove_spurious()
-            data = self.clean
-        if labels is None:
-            if self.labels is None:
-                if self.coordinates is None:
-                    self.reduce(data)
-                get_labels(self.coordinates)
-            labels = self.labels
-        x = self.clean
-        y = pd.get_dummies(labels).astype(int) if len(
-            set(labels)
-        ) > 2 else labels
+    def select_features(self, plot=False):
+
+        x = self.data
+        y = pd.get_dummies(self.labels).astype(int) if len(
+            set(self.labels)
+        ) > 2 else self.labels
         # Perform one-hot encoding on the categorical features
         encoder = OneHotEncoder()
         x_encoded = encoder.fit_transform(x)
@@ -319,7 +313,7 @@ class MSA(pd.DataFrame):
             {
                 'Residues': selected_features,
                 'Importance': rf.feature_importances_[selected_feature_indices],
-                'Columns': map(lambda x: int(x.split('_')[0]), selected_features)
+                'Columns': map(lambda ftr: int(ftr.split('_')[0]), selected_features)
             }
         )[['Columns', 'Importance']].groupby('Columns').sum()['Importance'].sort_values(ascending=False)
         sorted_features = sorted_importance.index
@@ -343,22 +337,12 @@ class MSA(pd.DataFrame):
         self.selected_features = selected_features
         self.sorted_importance = sorted_importance
 
-    def get_clusters(self, data=None, labels=None, treshold=0.9, plot=False, export_tree=False, prefix='output'):
+    def get_clusters(self, treshold=0.9, plot=False, export_tree=False, prefix='output'):
         """
         :return:
         """
-        if data is None:
-            if self.clean is None:
-                self.remove_spurious()
-            data = self.clean
-        if labels is None:
-            if self.labels is None:
-                if self.coordinates is None:
-                    self.reduce(data)
-                get_labels(self.coordinates)
-            labels = self.labels
         # Perform feature selection on data
-        self.select_features(data, labels)
+        self.select_features(self.data)
         # Calculate cumulative sum of importance
         cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
         # Find the index where cumulative importance exceeds or equals 0.9
@@ -367,19 +351,19 @@ class MSA(pd.DataFrame):
         selected_columns = self.sorted_importance.index[:index + 1].values
         # Filter the selected features to get most important residues
         selected_residues = [x for x in self.selected_features if int(x.split('_')[0]) in selected_columns]
-        df_res = self.analysis.column_coordinates(data[selected_columns]).loc[selected_residues]
+        df_res = self.analysis.column_coordinates(self.data[selected_columns]).loc[selected_residues]
         # Get sequence weights through Henikoff & Henikoff algorithm
         weights = self.henikoff(self.data[selected_columns])
         # Create an empty graph
-        G = nx.Graph()
+        g = nx.Graph()
         for idx in df_res.index:
             col, aa = idx.split('_')
             col = int(col)
-            rows = data[selected_columns].index[data[selected_columns][col] == aa].tolist()
+            rows = self.data[selected_columns].index[self.data[selected_columns][col] == aa].tolist()
             # Filter and sum values based on valid indices
             p = weights.iloc[[i for i in rows if i < len(weights)]].sum()
             # Add a node with attributes
-            G.add_node(
+            g.add_node(
                 f'{seq3(aa)}{col}',
                 idx=idx,
                 aa=aa,
@@ -391,31 +375,31 @@ class MSA(pd.DataFrame):
                 rows=rows,
                 p=p
             )
-        nodelist = sorted(G.nodes(), key=lambda x: G.nodes[x]['p'], reverse=True)
-        df_res = df_res.loc[[G.nodes[u]['idx'] for u in nodelist]]
+        nodelist = sorted(g.nodes(), key=lambda x: g.nodes[x]['p'], reverse=True)
+        df_res = df_res.loc[[g.nodes[u]['idx'] for u in nodelist]]
         df_res.columns = ['x_mca', 'y_mca']
         df_res = df_res.copy()
         # Generate pairwise combinations
-        pairwise_comparisons = list(combinations(G.nodes, 2))
+        pairwise_comparisons = list(combinations(g.nodes, 2))
         # Add edges to graph based on pairwise calculation of Jaccard's dissimilarity (1 - similarity)
         for u, v in pairwise_comparisons:
-            asymmetric_distance = set(G.nodes[u]['rows']) ^ set(G.nodes[v]['rows'])
-            union = set(G.nodes[u]['rows']) | set(G.nodes[v]['rows'])
+            asymmetric_distance = set(g.nodes[u]['rows']) ^ set(g.nodes[v]['rows'])
+            union = set(g.nodes[u]['rows']) | set(g.nodes[v]['rows'])
             weight = float(
                 weights.iloc[[i for i in list(asymmetric_distance) if i < len(weights)]].sum()
             ) / float(
                 weights.iloc[[i for i in list(union) if i < len(weights)]].sum()
-            ) if G.nodes[u]['col'] != G.nodes[v]['col'] else 1.
-            G.add_edge(
+            ) if g.nodes[u]['col'] != g.nodes[v]['col'] else 1.
+            g.add_edge(
                 u,
                 v,
                 weight=weight
             )
         # Generate distance matrix
-        D = nx.to_numpy_array(G, nodelist=nodelist)
+        d = nx.to_numpy_array(g, nodelist=nodelist)
         # Apply OPTICS on the points
         optics = OPTICS(metric='precomputed', min_samples=3)
-        optics.fit(D)
+        optics.fit(d)
         # Retrieve cluster labels
         cluster_labels = optics.labels_
         unique_labels = np.unique(cluster_labels)
@@ -425,51 +409,51 @@ class MSA(pd.DataFrame):
             cluster_nodes = [nodelist[idx] for idx in cluster_indices]
             clusters[i] = cluster_nodes
         adhesion = []
-        for row_idx in data.index:
+        for row_idx in self.data.index:
             temp = []
             for cluster in clusters:
                 count = 0
                 for node in cluster:
-                    if data.loc[row_idx, G.nodes[node]['col']] == G.nodes[node]['aa']:
+                    if self.data.loc[row_idx, g.nodes[node]['col']] == g.nodes[node]['aa']:
                         count += 1
                 temp.append(float(count) / float(len(cluster)))
             adhesion.append(np.array(temp))
         adhesion = np.array(adhesion)
         df_adh = pd.DataFrame(adhesion)
         df_adh.columns = [f"Cluster {label + 1}" if label >= 0 else "Noise" for label in unique_labels]
-        itemgetter_func = itemgetter(*data.index)
-        seq_ids = itemgetter_func(self.data.index)
+        itemgetter_func = itemgetter(*self.data.index)
+        seq_ids = itemgetter_func(self.raw_data.index)
         df_adh.index = seq_ids
         # Run clustermap with potential performance improvement
-        Z = fastcluster.linkage(df_adh, method='ward')
+        z = fastcluster.linkage(df_adh, method='ward')
         if export_tree:
-            write_dendrogram(Z, prefix)
+            write_dendrogram(z, prefix)
         # List to store silhouette scores
         silhouette_scores = []
         # Define a range of possible values for k
         k_values = range(2, 10)
         # Calculate silhouette score for each value of k
         for k in k_values:
-            labels = fcluster(Z, k, criterion='maxclust')
+            labels = fcluster(z, k, criterion='maxclust')
             silhouette_scores.append(silhouette_score(df_adh, labels))
         # Find the index of the maximum silhouette score
         best_index = np.argmax(silhouette_scores)
         # Get the best value of k
         best_k = k_values[best_index]
         # Get the cluster labels for each sequence in the MSA
-        sequence_labels = fcluster(Z, best_k, criterion='maxclust')
+        sequence_labels = fcluster(z, best_k, criterion='maxclust')
         if plot:
             # fig = plt.figure(figsize=(12, 7))  # Create the main figure container
             # Plot the distance matrix
             fig, ax = plt.subplots()
-            im = ax.imshow(D, cmap='viridis')
+            im = ax.imshow(d, cmap='viridis')
             # Add a colorbar
-            cbar = ax.figure.colorbar(im, ax=ax)
+            ax.figure.colorbar(im, ax=ax)
             plt.show()
             ordering = optics.ordering_
             # Perform MDS to obtain the actual points
             mds = MDS(n_components=2, dissimilarity='precomputed', normalized_stress='auto')
-            points = mds.fit_transform(D)
+            points = mds.fit_transform(d)
             df_res['x_mds'] = points[:, 0]
             df_res['y_mds'] = points[:, 1]
             df_res['label'] = cluster_labels
@@ -514,12 +498,24 @@ class MSA(pd.DataFrame):
                     marker = 'o'
                     label = f'Cluster {cluster_label + 1}'
                     alpha = None
-                scatter_mca = axs[0].scatter(x_mca[labels == cluster_label], y_mca[labels == cluster_label],
-                                             color=color, marker=marker, label=label, alpha=alpha)
-                scatter_mds = axs[1].scatter(x_mds[labels == cluster_label], y_mds[labels == cluster_label],
-                                             color=color, marker=marker, label=label, alpha=alpha)
+                scatter = axs[0].scatter(
+                    x_mca[labels == cluster_label],
+                    y_mca[labels == cluster_label],
+                    color=color,
+                    marker=marker,
+                    label=label,
+                    alpha=alpha
+                )
+                axs[1].scatter(
+                    x_mds[labels == cluster_label],
+                    y_mds[labels == cluster_label],
+                    color=color,
+                    marker=marker,
+                    label=label,
+                    alpha=alpha
+                )
                 # Collect the scatter plot handles and labels
-                handles.append(scatter_mca)
+                handles.append(scatter)
                 all_labels.append(label)
             # Rearrange labels to fill one row first and then the second row
             n_cols = 6  # Number of columns in the legend
@@ -537,17 +533,6 @@ class MSA(pd.DataFrame):
             plt.show()
         self.clusters = clusters
         self.labels = sequence_labels
-
-
-     def refine(self):
-        """
-        :return:
-        """
-        # Select most important features
-        self.select_features(self.clean, msa.labels, plot=True)
-        # Get cluster and sequence labels
-        msa.get_clusters(msa.clean, msa.labels, plot=True)
-        return None
 
     def bootstrap(self):
         """

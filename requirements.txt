@@ -9,3 +9,7 @@ scipy==1.10.1
 seaborn~=0.12.2
 setuptools==67.7.2
 Bio~=1.5.9
+nltk~=3.8.1
+fastcluster~=1.2.6
+wordcloud~=1.9.2
+prince~=0.10.5
