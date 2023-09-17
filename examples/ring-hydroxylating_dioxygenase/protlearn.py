@@ -3,7 +3,7 @@
 Protlearn is a module that implements the DB[RC/S3] (Density Based Residue Clustering by Dissimilarity
 Between Sequence SubSets) methodology.
 
-Copyright (C) 2023,   Lucas Carrijo de Oliveira (lucas@ebi.ac.uk)
+Copyright (C) 2023, Lucas Carrijo de Oliveira (lucas@ebi.ac.uk)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# Import necessary libraries
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
@@ -44,6 +45,10 @@ from operator import itemgetter
 import fastcluster
 from scipy.cluster.hierarchy import fcluster
 from functools import lru_cache
+import random
+import weblogo
+from weblogo import LogoOptions, LogoData, LogoFormat  # , write
+import os
 
 # Download necessary resources from NLTK
 nltk.download('punkt')
@@ -51,7 +56,13 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('omw-1.4')
 
+# Set a seed value for random number generation
+seed_value = 42  # You can choose any integer value as the seed
 
+# Use the seed value to initialize the random number generator
+random.seed(seed_value)
+
+# Define a dictionary for amino acid stereochemistry
 STHEREOCHEMISTRY = {
     'Aliphatic': ['G', 'A', 'V', 'L', 'I'],
     'Amide': ['N', 'Q'],
@@ -76,7 +87,13 @@ STHEREOCHEMISTRY = {
 
 def generate_wordcloud(df, column='Protein names'):
     """
-    :return:
+    Generate a word cloud visualization from protein names in a DataFrame.
+
+    Parameters:
+        df (DataFrame): The input DataFrame containing protein names.
+        column (str, default='Protein names'): The name of the column in the DataFrame containing protein names.
+
+    This function extracts substrate and enzyme names from the specified column using regular expressions, normalizes the names, and creates a word cloud plot.
     """
     # Extract the substrate and enzyme names using regular expressions
     matches = df[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
@@ -114,7 +131,16 @@ def generate_wordcloud(df, column='Protein names'):
 
 def get_newick(node, parent_dist, leaf_names, newick=""):
     """
-    :return:
+    Recursively construct a Newick string representation of a hierarchical tree.
+
+    Parameters:
+        node (TreeNode): The current node in the hierarchical tree.
+        parent_dist (float): The distance between the current node and its parent node.
+        leaf_names (list): A list of leaf names corresponding to the tree nodes.
+        newick (str, default=""): The Newick string representation of the hierarchical tree.
+
+    Returns:
+        A Newick string representation of the hierarchical tree.
     """
     if node.is_leaf():
         return f"{leaf_names[node.id]}:{parent_dist - node.dist:.2f}{newick}"
@@ -130,12 +156,32 @@ def get_newick(node, parent_dist, leaf_names, newick=""):
 
 
 def write_dendrogram(linkage_object, headers, prefix='output'):
+    """
+    Write the Newick representation of a dendrogram to a file.
+
+    Parameters:
+        linkage_object (object): The linkage object resulting from hierarchical clustering.
+        headers (list): A list of headers corresponding to the data points being clustered.
+        prefix (str, default='output'): The prefix for the output dendrogram file.
+
+    This function writes the Newick representation of a dendrogram to a file using the provided linkage object and headers.
+    """
     tree = to_tree(linkage_object, False)
     with open(f'{prefix}_dendrogram.nwk', 'w') as outfile:
         outfile.write(get_newick(tree, "", tree.dist, headers))
 
 
 def cached_property(method):
+    """
+    Create a cached property using the lru_cache decorator.
+
+    Parameters:
+        method (callable): A method that calculates the property value.
+
+    Returns:
+        The cached property value.
+    """
+
     @property
     @lru_cache()
     def wrapper(self):
@@ -145,10 +191,17 @@ def cached_property(method):
 
 
 class MSA(pd.DataFrame):
+    """
+    A class for processing and analyzing Multiple Sequence Alignments (MSA).
+    """
 
     def __init__(self, *args, **kwargs):
+        """
+        Initialize the MSA object.
+        """
         super().__init__(*args, **kwargs)
         self.msa_file = None
+        self.headers = None
         self.raw_data = None
         self.data = None
         self.alphabet = None
@@ -160,16 +213,30 @@ class MSA(pd.DataFrame):
         self.clusters = None
 
     def parse_msa_file(self, msa_file, msa_format="fasta", *args, **kwargs):
+        """
+        Parse an MSA file and store the raw data in the MSA object.
+
+        Parameters:
+            msa_file (str): The path to the MSA file.
+            msa_format (str, optional): The format of the MSA file (default is "fasta").
+        """
         self.msa_file = msa_file
         headers, sequences = [], []
         for record in SeqIO.parse(self.msa_file, msa_format, *args, **kwargs):
             headers.append(record.id)
             sequences.append(record.seq)
+        self.headers = headers
         self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
 
     def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
         """
-        :return:
+        Cleanse the MSA data by removing columns and rows with missing values.
+
+        Parameters:
+            indel (str, optional): The character representing gaps/indels (default is '-').
+            remove_lowercase (bool, optional): Whether to remove lowercase characters (default is True).
+            threshold (float, optional): The threshold for missing values (default is 0.9).
+            plot (bool, optional): Whether to plot a heatmap of missing values (default is False).
         """
         to_remove = [indel]
         if remove_lowercase:
@@ -194,12 +261,15 @@ class MSA(pd.DataFrame):
             .fillna('-') \
             .copy()
 
-    def analyse(self, plot=False, *args, **kargs):
+    def analyse(self, plot=False, *args, **kwargs):
         """
-        :return:
+        Perform Multidimensional Correspondence Analysis (MCA) on the MSA data.
+
+        Parameters:
+            plot (bool, optional): Whether to plot the results (default is False).
         """
         # Perform MCA
-        mca = MCA(*args, **kargs)
+        mca = MCA(*args, **kwargs)
         mca.fit(self.data)
         if plot:
             try:
@@ -214,18 +284,24 @@ class MSA(pd.DataFrame):
         self.analysis = mca
 
     def reduce(self):
+        """
+        Reduce the dimensionality of the MSA data using the MCA analysis.
+        """
         # Get the row coordinates
         self.coordinates = self.analysis.transform(self.data)
 
     def get_labels(self, plot=False):
         """
-        :return:
+        Cluster the MSA data and obtain cluster labels.
+
+        Parameters:
+            plot (bool, optional): Whether to plot the clustering results (default is False).
         """
         coordinates = np.array(self.coordinates)
         # Define a range of potential number of clusters to evaluate
         min_clusters = 3
         max_clusters = 10
-        # Perform clustering for different number of clusters and compute silhouette scores
+        # Perform clustering for different numbers of clusters and compute silhouette scores
         silhouette_scores = []
         for k in range(min_clusters, max_clusters + 1):
             kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
@@ -253,7 +329,13 @@ class MSA(pd.DataFrame):
     @staticmethod
     def henikoff(data):
         """
-        :return: A pandas Series containing the calculated weights.
+        Calculate sequence weights using the Henikoff & Henikoff algorithm.
+
+        Parameters:
+            data (pd.DataFrame): The MSA data.
+
+        Returns:
+            pd.Series: A Series containing the calculated weights.
         """
         data_array = data.to_numpy()  # Convert DataFrame to NumPy array
         size, length = data_array.shape
@@ -266,8 +348,15 @@ class MSA(pd.DataFrame):
             weights.append(np.sum(matrix_row) / length)
         return pd.Series(weights, index=data.index)
 
-    def select_features(self, plot=False):
+    def select_features(self, n_estimators=None, random_state=None, plot=False):
+        """
+        Select important features (residues) from the MSA data.
 
+        Parameters:
+            n_estimators (int, optional): Parameter n_estimators for RandomForest.
+            random_state: (int, optional): Parameter random_state for RandomForest.
+            plot (bool, optional): Whether to plot feature selection results (default is False).
+        """
         x = self.data
         y = pd.get_dummies(self.labels).astype(int) if len(
             set(self.labels)
@@ -285,7 +374,7 @@ class MSA(pd.DataFrame):
         # Convert X_encoded to DataFrame
         x_encoded_df = pd.DataFrame.sparse.from_spmatrix(x_encoded, columns=encoded_feature_names)
         # Create and train the Random Forest classifier
-        rf = RandomForestClassifier()
+        rf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
         rf.fit(x_encoded_df, y)
         # Feature selection
         feature_selector = SelectFromModel(rf, threshold='median')
@@ -306,34 +395,42 @@ class MSA(pd.DataFrame):
             # Bar chart of percentage importance
             xvalues = range(len(sorted_features))
             ax1.bar(xvalues, sorted_importance, color='b')
-            ax1.set_ylabel('Summed Importance')
-            ax1.tick_params(axis='y')
+            ax1.set_ylabel('Summed Importance', fontsize=12)
+            ax1.tick_params(axis='y', labelsize=12)
             # Line chart of cumulative percentage importance
             ax2 = ax1.twinx()
             ax2.plot(xvalues, np.cumsum(sorted_importance) / np.sum(sorted_importance), color='r', marker='.')
-            ax2.set_ylabel('Cumulative Importance')
-            ax2.tick_params(axis='y')
+            ax2.set_ylabel('Cumulative Importance', fontsize=12)
+            ax2.tick_params(axis='y', labelsize=12)
             # Rotate x-axis labels
-            plt.xticks(xvalues, sorted_features)
+            plt.xticks(xvalues, sorted_features, fontsize=12)
             plt.setp(ax1.xaxis.get_majorticklabels(), rotation=90)
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=90)
             plt.show()
         self.selected_features = selected_features
         self.sorted_importance = sorted_importance
 
-    def get_clusters(self, treshold=0.9, plot=False, export_tree=False, prefix='output'):
+    def get_clusters(self, selected_columns=None, threshold=0.9, plot=False, export_tree=False, prefix='output'):
         """
-        :return:
+        Cluster sequences in the MSA data.
+
+        Parameters:
+            selected_columns (list, optional): list of previously selected MSA columns to base on.
+            threshold (float, optional): The threshold for selecting important residues (default is 0.9).
+            plot (bool, optional): Whether to plot the clustering results (default is False).
+            export_tree (bool, optional): Whether to export the clustering dendrogram (default is False).
+            prefix (str, optional): The prefix for the output dendrogram file (default is 'output').
         """
-        # Perform feature selection on data
-        self.select_features()
-        # Calculate cumulative sum of importance
-        cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
-        # Find the index where cumulative importance exceeds or equals 0.9
-        index = np.where(cumulative_importance >= treshold)[0][0]
-        # Get the values from sorted_features up to the index
-        selected_columns = self.sorted_importance.index[:index + 1].values
-        # Filter the selected features to get most important residues
+        if not selected_columns:
+            # Perform feature selection on data
+            self.select_features()
+            # Calculate cumulative sum of importance
+            cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
+            # Find the index where cumulative importance exceeds or equals 0.9
+            index = np.where(cumulative_importance >= threshold)[0][0]
+            # Get the values from sorted_features up to the index
+            selected_columns = self.sorted_importance.index[:index + 1].values
+            # Filter the selected features to get the most important residues
         selected_residues = [x for x in self.selected_features if int(x.split('_')[0]) in selected_columns]
         df_res = self.analysis.column_coordinates(self.data[selected_columns]).loc[selected_residues]
         # Get sequence weights through Henikoff & Henikoff algorithm
@@ -365,7 +462,7 @@ class MSA(pd.DataFrame):
         df_res = df_res.copy()
         # Generate pairwise combinations
         pairwise_comparisons = list(combinations(g.nodes, 2))
-        # Add edges to graph based on pairwise calculation of Jaccard's dissimilarity (1 - similarity)
+        # Add edges to the graph based on pairwise calculation of Jaccard's dissimilarity (1 - similarity)
         for u, v in pairwise_comparisons:
             asymmetric_distance = set(g.nodes[u]['rows']) ^ set(g.nodes[v]['rows'])
             union = set(g.nodes[u]['rows']) | set(g.nodes[v]['rows'])
@@ -379,7 +476,7 @@ class MSA(pd.DataFrame):
                 v,
                 weight=weight
             )
-        # Generate distance matrix
+        # Generate a distance matrix
         d = nx.to_numpy_array(g, nodelist=nodelist)
         # Apply OPTICS on the points
         optics = OPTICS(metric='precomputed', min_samples=3)
@@ -515,14 +612,14 @@ class MSA(pd.DataFrame):
                                cbar_pos=(.4, .9, .4, .02), cbar_kws=cbar_kws, figsize=(5, 5))
             # Show the plot
             plt.show()
-        self.clusters = {label:cluster for label, cluster in zip(unique_labels, clusters)}
+        self.clusters = {label: cluster for label, cluster in zip(unique_labels, clusters)}
         self.labels = sequence_labels
 
-    def bootstrap(self):
-        """
-        :return:
-        """
-        return None
+    # def bootstrap(self):
+    #     """
+    #     :return:
+    #     """
+    #     return None
 
     # def merged_to(self, metadata_file, *args, **kargs):
     #     """
