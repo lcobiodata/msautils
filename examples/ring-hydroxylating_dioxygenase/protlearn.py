@@ -201,7 +201,6 @@ class MSA(pd.DataFrame):
         """
         super().__init__(*args, **kwargs)
         self.msa_file = None
-        self.headers = None
         self.raw_data = None
         self.data = None
         self.alphabet = None
@@ -225,7 +224,6 @@ class MSA(pd.DataFrame):
         for record in SeqIO.parse(self.msa_file, msa_format, *args, **kwargs):
             headers.append(record.id)
             sequences.append(record.seq)
-        self.headers = headers
         self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
 
     def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
