@@ -237,23 +237,37 @@ class MSA(pd.DataFrame):
             plot (bool, optional): Whether to plot a heatmap of missing values (default is False).
         """
         to_remove = [indel]
+        dirty = self.raw_data.copy()
         if remove_lowercase:
-            clean = self.raw_data.copy()
             to_remove += [chr(i) for i in range(ord('a'), ord('z') + 1)]
         else:
-            clean = self.raw_data.applymap(str.upper).copy()
-        clean.replace(to_remove, np.nan, inplace=True)
-        min_rows = int(threshold * clean.shape[0])
+            dirty = self.raw_data.applymap(str.upper).copy()
+        dirty.replace(to_remove, np.nan, inplace=True)
+        min_rows = int(threshold * dirty.shape[0])
         # Remove columns with NaN values above the threshold
+        clean = dirty.copy()
         clean.dropna(thresh=min_rows, axis=1, inplace=True)
         min_cols = int(threshold * clean.shape[1])
         # Remove rows with NaN values above the threshold
         clean.dropna(thresh=min_cols, axis=0, inplace=True)
+
         if plot:
-            # Plot the heatmap
+            # Plot the heatmap before cleansing
+            plt.subplot(1, 2, 1)
+            sns.heatmap(dirty.isna().astype(int), cmap='binary', xticklabels=False, yticklabels=False, cbar=False)
+            plt.title("Before Cleansing")
+
+            # Plot the heatmap after cleansing
+            plt.subplot(1, 2, 2)
             sns.heatmap(clean.isna().astype(int), cmap='binary', xticklabels=False, yticklabels=False, cbar=False)
+            plt.title("After Cleansing")
+
+            # Adjust subplot layout
+            plt.tight_layout()
+
             # Show the plot
             plt.show()
+
         self.data = clean.reset_index(drop=True) \
             .drop_duplicates() \
             .fillna('-') \
@@ -288,41 +302,63 @@ class MSA(pd.DataFrame):
         # Get the row coordinates
         self.coordinates = self.analysis.transform(self.data)
 
-    def get_labels(self, plot=False):
+    def get_labels(self, min_clusters=2, max_clusters=10, method='k-means', plot=False):
         """
         Cluster the MSA data and obtain cluster labels.
 
         Parameters:
             plot (bool, optional): Whether to plot the clustering results (default is False).
+            min_clusters (int, optional): Minimum amount of clusters.
+            max_clusters (int, optional): Maximum amount of clusters.
+            method (string, optional): Custering method (k-means or single-linkage).
         """
         coordinates = np.array(self.coordinates)
         # Define a range of potential number of clusters to evaluate
-        min_clusters = 3
-        max_clusters = 10
+        k_values = range(min_clusters, max_clusters)
+
         # Perform clustering for different numbers of clusters and compute silhouette scores
         silhouette_scores = []
         for k in range(min_clusters, max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
-            kmeans.fit(coordinates)
-            labels = kmeans.labels_
-            score = silhouette_score(coordinates, labels)
-            silhouette_scores.append(score)
-        # Find the best number of clusters based on the highest silhouette score
-        best_num_clusters = np.argmax(silhouette_scores) + min_clusters
-        # Perform clustering with the best number of clusters
-        kmeans = KMeans(n_clusters=best_num_clusters, n_init=10)  # Set n_init explicitly
-        kmeans.fit(coordinates)
+            if method == 'k-means':
+                kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
+                kmeans.fit(coordinates)
+                labels = kmeans.labels_
+                score = silhouette_score(coordinates, labels)
+                silhouette_scores.append(score)
+            elif method == 'single-linkage':
+                # Run clustermap with potential performance improvement
+                z = fastcluster.linkage(coordinates, method='ward')
+                # Calculate silhouette score for each value of k
+                labels = fcluster(z, k, criterion='maxclust')
+                silhouette_scores.append(silhouette_score(coordinates, labels))
+
+            # Find the index of the maximum silhouette score
+            best_index = np.argmax(silhouette_scores)
+            # Find the best number of clusters based on the highest silhouette score
+            best_num_clusters = best_index + min_clusters
+
+            if method == 'k-means':
+                # Perform clustering with the best number of clusters
+                kmeans = KMeans(n_clusters=best_num_clusters, n_init=10)  # Set n_init explicitly
+                kmeans.fit(coordinates)
+                self.labels = kmeans.labels_
+            elif method == 'single-linkage':
+                # Get the best value of k
+                best_k = k_values[best_index]
+                # Get the cluster labels for each sequence in the MSA
+                self.labels = fcluster(z, best_k, criterion='maxclust')
+
         if plot:
-            cluster_centers = kmeans.cluster_centers_
             # Plot the scatter plot colored by clusters
-            plt.scatter(coordinates[:, 0], coordinates[:, 1], c=kmeans.labels_, cmap='viridis')
-            plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='red', marker='x', label='Cluster Centers')
+            plt.scatter(coordinates[:, 0], coordinates[:, 1], c=kmeans.labels_, cmap='viridis', alpha=0.5)
+            if method == 'k-means':
+                cluster_centers = kmeans.cluster_centers_
+                plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='red', marker='x', label='Cluster Centers')
             plt.xlabel('Dimension 1')
             plt.ylabel('Dimension 2')
-            plt.title('Scatter Plot - Clusters')
+            plt.title("Scatter Plot of Clustered Sequences' Coordinates from MCA")
             plt.legend()
             plt.show()
-        self.labels = kmeans.labels_
 
     @staticmethod
     def henikoff(data):
@@ -393,15 +429,15 @@ class MSA(pd.DataFrame):
             # Bar chart of percentage importance
             xvalues = range(len(sorted_features))
             ax1.bar(xvalues, sorted_importance, color='b')
-            ax1.set_ylabel('Summed Importance', fontsize=12)
+            ax1.set_ylabel('Summed Importance', fontsize=16)
             ax1.tick_params(axis='y', labelsize=12)
             # Line chart of cumulative percentage importance
             ax2 = ax1.twinx()
             ax2.plot(xvalues, np.cumsum(sorted_importance) / np.sum(sorted_importance), color='r', marker='.')
-            ax2.set_ylabel('Cumulative Importance', fontsize=12)
+            ax2.set_ylabel('Cumulative Importance', fontsize=16)
             ax2.tick_params(axis='y', labelsize=12)
             # Rotate x-axis labels
-            plt.xticks(xvalues, sorted_features, fontsize=12)
+            plt.xticks(xvalues, sorted_features)#, fontsize=12)
             plt.setp(ax1.xaxis.get_majorticklabels(), rotation=90)
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=90)
             plt.show()
