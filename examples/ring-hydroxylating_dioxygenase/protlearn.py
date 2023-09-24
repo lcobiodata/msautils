@@ -46,9 +46,8 @@ import fastcluster
 from scipy.cluster.hierarchy import fcluster
 from functools import lru_cache
 import random
-import weblogo
-from weblogo import LogoOptions, LogoData, LogoFormat  # , write
-import os
+from collections import defaultdict
+import logomaker as lm
 
 # Download necessary resources from NLTK
 nltk.download('punkt')
@@ -83,50 +82,6 @@ STHEREOCHEMISTRY = {
     'With hydroxyl': ['S', 'T', 'Y'],
     'With sulfur': ['C', 'M']
 }
-
-
-def generate_wordcloud(df, column='Protein names'):
-    """
-    Generate a word cloud visualization from protein names in a DataFrame.
-
-    Parameters:
-        df (DataFrame): The input DataFrame containing protein names.
-        column (str, default='Protein names'): The name of the column in the DataFrame containing protein names.
-
-    This function extracts substrate and enzyme names from the specified column using regular expressions, normalizes the names, and creates a word cloud plot.
-    """
-    # Extract the substrate and enzyme names using regular expressions
-    matches = df[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
-    # String normalization pipeline
-    df['Substrate'] = matches[0] \
-        .fillna('') \
-        .apply(lambda x: '/'.join(re.findall(r'\b(\w+(?:ene|ine|ate|yl))\b', x, flags=re.IGNORECASE))) \
-        .apply(lambda x: x.lower())
-    df['Enzyme'] = matches[1] \
-        .fillna('') \
-        .apply(lambda x: x.split('-')[-1] if '-' in x else x) \
-        .apply(lambda x: x.lower())
-    df['Label'] = df['Substrate'].str.cat(df['Enzyme'], sep=' ').str.strip()
-    df = df.copy()
-    # Plot the word cloud
-    plt.figure(figsize=(10, 6))
-    plt.imshow(
-        WordCloud(
-            width=800,
-            height=400,
-            background_color='white'
-        ).generate(
-            ' '.join(
-                sorted(
-                    set([string for string in df.Label.values.tolist() if len(string) > 0])
-                )
-            )
-        ),
-        interpolation='bilinear'
-    )
-    plt.axis('off')
-    plt.show()
-    return None
 
 
 def get_newick(node, parent_dist, leaf_names, newick=""):
@@ -164,7 +119,8 @@ def write_dendrogram(linkage_object, headers, prefix='output'):
         headers (list): A list of headers corresponding to the data points being clustered.
         prefix (str, default='output'): The prefix for the output dendrogram file.
 
-    This function writes the Newick representation of a dendrogram to a file using the provided linkage object and headers.
+    This function writes the Newick representation of a dendrogram to a file using the provided
+    linkage object and headers.
     """
     tree = to_tree(linkage_object, False)
     with open(f'{prefix}_dendrogram.nwk', 'w') as outfile:
@@ -202,6 +158,7 @@ class MSA(pd.DataFrame):
         super().__init__(*args, **kwargs)
         self.msa_file = None
         self.raw_data = None
+        self.positions_map = None
         self.data = None
         self.alphabet = None
         self.analysis = None
@@ -209,7 +166,10 @@ class MSA(pd.DataFrame):
         self.labels = None
         self.sorted_importance = None
         self.selected_features = None
+        self.selected_columns = None
+        self.profiles = None
         self.clusters = None
+        self.plots = None
 
     def parse_msa_file(self, msa_file, msa_format="fasta", *args, **kwargs):
         """
@@ -225,6 +185,21 @@ class MSA(pd.DataFrame):
             headers.append(record.id)
             sequences.append(record.seq)
         self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
+        self.plots = defaultdict(list)
+
+    def map_positions(self):
+        """
+
+        """
+        self.positions_map = defaultdict(dict)
+        for header in self.raw_data.index:
+            sequence = self.raw_data.loc[header]
+            offset = int(header.split('/')[1].split('-')[0])
+            count = offset - 1
+            for index, value in zip(sequence.index, sequence.values):
+                if value != '-':
+                    count += 1
+                    self.positions_map[header][index] = count
 
     def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
         """
@@ -265,8 +240,8 @@ class MSA(pd.DataFrame):
             # Adjust subplot layout
             plt.tight_layout()
 
-            # Show the plot
-            plt.show()
+            # Storage the plot
+            self.plots['cleanse_data'].append(plt)
 
         self.data = clean.reset_index(drop=True) \
             .drop_duplicates() \
@@ -302,7 +277,7 @@ class MSA(pd.DataFrame):
         # Get the row coordinates
         self.coordinates = self.analysis.transform(self.data)
 
-    def get_labels(self, min_clusters=2, max_clusters=10, method='k-means', plot=False):
+    def get_labels(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False):
         """
         Cluster the MSA data and obtain cluster labels.
 
@@ -312,75 +287,139 @@ class MSA(pd.DataFrame):
             max_clusters (int, optional): Maximum amount of clusters.
             method (string, optional): Custering method (k-means or single-linkage).
         """
+        if method not in ['k-means', 'single-linkage']:
+            raise ValueError("method must be 'k-means' or 'single-linkage")
         coordinates = np.array(self.coordinates)
         # Define a range of potential number of clusters to evaluate
         k_values = range(min_clusters, max_clusters)
-
         # Perform clustering for different numbers of clusters and compute silhouette scores
-        silhouette_scores = []
+        model, silhouette_scores = None, []
         for k in range(min_clusters, max_clusters + 1):
             if method == 'k-means':
-                kmeans = KMeans(n_clusters=k, n_init=10)  # Set n_init explicitly
-                kmeans.fit(coordinates)
-                labels = kmeans.labels_
+                model = KMeans(n_clusters=k, n_init=max_clusters)  # Set n_init explicitly
+                model.fit(coordinates)
+                labels = model.labels_
                 score = silhouette_score(coordinates, labels)
                 silhouette_scores.append(score)
             elif method == 'single-linkage':
                 # Run clustermap with potential performance improvement
-                z = fastcluster.linkage(coordinates, method='ward')
+                model = fastcluster.linkage(coordinates, method='ward')
                 # Calculate silhouette score for each value of k
-                labels = fcluster(z, k, criterion='maxclust')
+                labels = fcluster(model, k, criterion='maxclust')
                 silhouette_scores.append(silhouette_score(coordinates, labels))
-
             # Find the index of the maximum silhouette score
             best_index = np.argmax(silhouette_scores)
-            # Find the best number of clusters based on the highest silhouette score
-            best_num_clusters = best_index + min_clusters
-
+            # Perform the actual modeling depending on the chosen algorithm
             if method == 'k-means':
+                # Find the best number of clusters based on the highest silhouette score
+                best_num_clusters = best_index + min_clusters
                 # Perform clustering with the best number of clusters
-                kmeans = KMeans(n_clusters=best_num_clusters, n_init=10)  # Set n_init explicitly
-                kmeans.fit(coordinates)
-                self.labels = kmeans.labels_
+                model = KMeans(n_clusters=best_num_clusters, n_init=max_clusters)
+                model.fit(coordinates)
+                self.labels = model.labels_
             elif method == 'single-linkage':
                 # Get the best value of k
                 best_k = k_values[best_index]
                 # Get the cluster labels for each sequence in the MSA
-                self.labels = fcluster(z, best_k, criterion='maxclust')
-
+                self.labels = fcluster(model, best_k, criterion='maxclust')
+        # Display the results if plot is True
         if plot:
             # Plot the scatter plot colored by clusters
-            plt.scatter(coordinates[:, 0], coordinates[:, 1], c=kmeans.labels_, cmap='viridis', alpha=0.5)
-            if method == 'k-means':
-                cluster_centers = kmeans.cluster_centers_
-                plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='red', marker='x', label='Cluster Centers')
+            plt.scatter(coordinates[:, 0], coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
             plt.xlabel('Dimension 1')
             plt.ylabel('Dimension 2')
             plt.title("Scatter Plot of Clustered Sequences' Coordinates from MCA")
-            plt.legend()
-            plt.show()
+            self.plots['get_labels'].append(plt)
 
-    @staticmethod
-    def henikoff(data):
+    def generate_wordcloud(self, df, column='Protein names'):
         """
-        Calculate sequence weights using the Henikoff & Henikoff algorithm.
+        Generate a word cloud visualization from protein names in a DataFrame.
 
         Parameters:
-            data (pd.DataFrame): The MSA data.
+            df (DataFrame): The input DataFrame containing protein names.
+            column (str, default='Protein names'): The name of the column in the DataFrame containing protein names.
 
-        Returns:
-            pd.Series: A Series containing the calculated weights.
+        This function extracts substrate and enzyme names from the specified column using regular expressions,
+        normalizes the names, and creates a word cloud plot.
         """
-        data_array = data.to_numpy()  # Convert DataFrame to NumPy array
-        size, length = data_array.shape
-        weights = []
-        for seq_index in range(size):
-            row = data_array[seq_index, :]
-            unique_vals, counts = np.unique(row, return_counts=True)
-            k = len(unique_vals)
-            matrix_row = 1. / (k * counts)
-            weights.append(np.sum(matrix_row) / length)
-        return pd.Series(weights, index=data.index)
+        # Extract the substrate and enzyme names using regular expressions
+        matches = df[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
+        # String normalization pipeline
+        df['Substrate'] = matches[0] \
+            .fillna('') \
+            .apply(lambda x: '/'.join(re.findall(r'\b(\w+(?:ene|ine|ate|yl))\b', x, flags=re.IGNORECASE))) \
+            .apply(lambda x: x.lower())
+        df['Enzyme'] = matches[1] \
+            .fillna('') \
+            .apply(lambda x: x.split('-')[-1] if '-' in x else x) \
+            .apply(lambda x: x.lower())
+        df['Label'] = df['Substrate'].str.cat(df['Enzyme'], sep=' ').str.strip()
+        df = df.copy()
+        # Plot the word cloud
+        plt.figure(figsize=(10, 6))
+        plt.imshow(
+            WordCloud(
+                width=800,
+                height=400,
+                background_color='white'
+            ).generate(
+                ' '.join(
+                    sorted(
+                        set([string for string in df.Label.values.tolist() if len(string) > 0])
+                    )
+                )
+            ),
+            interpolation='bilinear'
+        )
+        plt.axis('off')
+        self.plots['generate_wordcloud'].append(plt)
+
+    def generate_logos(self, color_scheme='dmslogo_funcgroup'):
+        color_schemes = lm.list_color_schemes()
+        color_schemes_list = sorted(
+            color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values)
+        if color_scheme not in color_schemes_list:
+            raise ValueError(f"color scheme must be in {color_schemes_list}")
+        for label in set(self.labels):
+            sub_msa = self.data[sorted(self.selected_columns)].iloc[self.labels == label]
+
+            # Calculate sequence frequencies for each position
+            data = sub_msa.T.apply(lambda col: col.value_counts(normalize=True), axis=1).fillna(0)
+
+            msa_columns = data.index.tolist()
+
+            data = data.reset_index(drop=True)
+
+            # Create a sequence logo from the DataFrame
+            seq_logo = lm.Logo(data,
+                               color_scheme=color_scheme,
+                               vpad=.1,
+                               width=.8)
+
+            # Customize the appearance of the logo
+            seq_logo.style_spines(visible=False)
+
+            # Get the axes from the logo object
+            ax = seq_logo.ax
+
+            # Set custom X-axis labels (string labels)
+            ax.set_xticks(range(len(msa_columns)))
+            ax.set_xticklabels(msa_columns)
+
+            # Storage the plot
+            self.plots['generate_logos'].append(plt)
+
+    def annotate(self, path_to_metadata=None):
+        # Read the TSV file into a DataFrame
+        if path_to_metadata is not None:
+            metadata = pd.read_csv(path_to_metadata, delimiter='\t')
+            for label in set(self.labels):
+                indices = self.data.iloc[self.labels == label].index
+                headers = self.raw_data.index[indices]
+                # Perform a left join using different key column names
+                entry_names = [header.split('/')[0] for header in headers]
+                result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
+                self.generate_wordcloud(result)
 
     def select_features(self, n_estimators=None, random_state=None, plot=False):
         """
@@ -437,12 +476,93 @@ class MSA(pd.DataFrame):
             ax2.set_ylabel('Cumulative Importance', fontsize=16)
             ax2.tick_params(axis='y', labelsize=12)
             # Rotate x-axis labels
-            plt.xticks(xvalues, sorted_features)#, fontsize=12)
+            plt.xticks(xvalues, sorted_features)
             plt.setp(ax1.xaxis.get_majorticklabels(), rotation=90)
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=90)
-            plt.show()
+            self.plots['select_features'].append(plt)
         self.selected_features = selected_features
         self.sorted_importance = sorted_importance
+
+    def get_sdps(self, threshold=0.9, top_n=None, plot=False):
+        """
+
+        """
+        # Calculate cumulative sum of importance
+        cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
+        # Find the index where cumulative importance exceeds or equals a threshold (default is 0.9)
+        cutoff = np.where(cumulative_importance >= threshold)[0][0]
+        # Get the values from sorted_features up to the index
+        selected_columns = self.sorted_importance.index[:cutoff + 1].values
+        # Filter the selected features to get the 'top_n' most important residues
+        self.selected_columns = selected_columns if top_n is None else selected_columns[:top_n]
+        # Create an empty DataFrame with columns
+        self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
+        # Iterate through rows of msa.data
+        for index, row in self.data[self.selected_columns].iterrows():
+            header = self.raw_data.index[index]
+            series = pd.Series(
+                {col: f"{seq3(aa)}{self.positions_map[header].get(col, '?')}" for col, aa in row.items()}
+            ).sort_index()
+            self.profiles = pd.concat([self.profiles, series.to_frame().T], axis=0)
+        # Set the custom index to the resulting DataFrame
+        self.profiles.index = self.raw_data.index[self.data.index]
+        if plot:
+            selected_residues = [
+                feature for feature in self.selected_features if int(feature.split('_')[0]) in self.selected_columns
+            ]
+            df_res = self.analysis.column_coordinates(self.data[self.selected_columns]).loc[selected_residues]
+            residues = []
+            for res_idx in df_res.index:
+                msa_column, amino_acid = res_idx.split('_')
+                three_letter_aa = seq3(amino_acid)
+                residues.append(three_letter_aa + msa_column)
+            df_res = df_res.set_index(pd.Index(residues))
+            # Create figure
+            plt.figure(figsize=(8, 6))
+            # Scatter plot of sequences colored by cluster labels
+            seq_coord = np.array(self.coordinates)
+            plt.scatter(
+                seq_coord[:, 0],
+                seq_coord[:, 1],
+                c=self.labels,
+                cmap='viridis',
+                alpha=0.5,
+                label='Sequence Custers'
+            )
+            # Scatter plot of labeled residues
+            plt.scatter(df_res[0], df_res[1], marker='x', color='black', s=50, label='Selected Residues')
+            for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
+                plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
+            # Set labels and title
+            plt.xlabel('Dimension 1')
+            plt.ylabel('Dimension 2')
+            plt.title('Conceptual Map of Clustered Sequences and Selected Residues')
+            # Show the plot
+            plt.legend()
+            plt.grid()
+            self.plots['get_sdps'].append(plt)
+
+    @staticmethod
+    def henikoff(data):
+        """
+        Calculate sequence weights using the Henikoff & Henikoff algorithm.
+
+        Parameters:
+            data (pd.DataFrame): The MSA data.
+
+        Returns:
+            pd.Series: A Series containing the calculated weights.
+        """
+        data_array = data.to_numpy()  # Convert DataFrame to NumPy array
+        size, length = data_array.shape
+        weights = []
+        for seq_index in range(size):
+            row = data_array[seq_index, :]
+            unique_vals, counts = np.unique(row, return_counts=True)
+            k = len(unique_vals)
+            matrix_row = 1. / (k * counts)
+            weights.append(np.sum(matrix_row) / length)
+        return pd.Series(weights, index=data.index)
 
     def get_clusters(self, selected_columns=None, threshold=0.9, plot=False, export_tree=False, prefix='output'):
         """
@@ -564,7 +684,7 @@ class MSA(pd.DataFrame):
             im = ax.imshow(d, cmap='viridis')
             # Add a colorbar
             ax.figure.colorbar(im, ax=ax)
-            plt.show()
+            self.plots['get_clusters'].append(plt)
             ordering = optics.ordering_
             # Perform MDS to obtain the actual points
             mds = MDS(n_components=2, dissimilarity='precomputed', normalized_stress='auto')
@@ -581,7 +701,7 @@ class MSA(pd.DataFrame):
             plt.ylabel('Reachability Distance')
             plt.title('Ordering Analysis')
             # Show the plots
-            plt.show()
+            self.plots['get_clusters'].append(plt)
             # Create a figure with two subplots
             fig, axs = plt.subplots(1, 2, figsize=(12, 7))
             # Plot for MCA
@@ -645,7 +765,7 @@ class MSA(pd.DataFrame):
             g = sns.clustermap(df_adh.drop('Noise', axis=1), col_cluster=False, yticklabels=False,
                                cbar_pos=(.4, .9, .4, .02), cbar_kws=cbar_kws, figsize=(5, 5))
             # Show the plot
-            plt.show()
+            self.plots['get_clusters'].append(plt)
         self.clusters = {label: cluster for label, cluster in zip(unique_labels, clusters)}
         self.labels = sequence_labels
 
@@ -683,3 +803,5 @@ class MSA(pd.DataFrame):
     #     if data is None:
     #         data = self.data
     #     self.alphabet = np.unique(data.applymap(str.upper).values.flatten())
+
+# %%

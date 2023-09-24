@@ -13,4 +13,4 @@ nltk~=3.8.1
 fastcluster~=1.2.6
 wordcloud~=1.9.2
 prince~=0.10.5
-weblogo~=3.7.12
+logomaker~=0.8
