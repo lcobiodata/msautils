@@ -1,0 +1,27 @@
+Cluster 1
+"MSA
+Column",Feature,Frequency
+67,Cys,0.61
+71,Val,0.50
+72,Lys,0.66
+117,Glu,0.64
+152,Glu,0.52
+162,Ala,0.42
+171,Thr,0.33
+219,Thr,0.53
+221,Val,0.35
+
+Cluster 2
+"MSA
+Column",Feature,Frequency
+67,Ser,0.27
+71,Thr,0.34
+72,His,0.31
+117,Arg,0.29
+118,Cys,0.31
+152,Pro,0.34
+162,Ile,0.31
+171,His,0.35
+219,Tyr,0.32
+221,Gly,0.38
+

@@ -1,0 +1,10 @@
+argparse
+numpy
+scipy
+matplotlib
+networkx
+biopython
+pyclustering
+scikit-learn
+pandas
+seaborn
