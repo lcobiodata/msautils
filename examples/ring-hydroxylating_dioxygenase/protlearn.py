@@ -167,27 +167,36 @@ class MSA(pd.DataFrame):
             .copy()
 
         self.plots['cleanse_data'] = plot  # Set a flag to indicate plotting
+        if plot:
+            self._plot_cleanse_heatmaps()
 
-    def _plot_cleanse_heatmaps(self, ax):
+    def _plot_cleanse_heatmaps(self):
         """
         Generate and display cleansing heatmaps plot on the specified axes.
-        """
+            """
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # Create a figure with two subplots
+        fig.suptitle("Cleansing Heatmaps", fontsize=16)
+
         # Create the heatmap before cleansing on the first Axes
-        heatmap_before = ax.imshow(self.dirty.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
-        ax.set_title('Before Cleansing')
+        ax1 = axes[0]  # First subplot
+        heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
+        ax1.set_title('Before Cleansing')
 
         # Create the heatmap after cleansing on the second Axes
-        ax = plt.subplot(1, 2, 2)  # Move to the second subplot
-        heatmap_after = ax.imshow(self.clean.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
-        ax.set_title('After Cleansing')
+        ax2 = axes[1]  # Second subplot
+        heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
+        ax2.set_title('After Cleansing')
 
         # Add color bars to the right of the heatmaps
-        cbar_before = plt.colorbar(heatmap_before, ax=ax)
+        cbar_before = plt.colorbar(heatmap_before, ax=ax1)
         cbar_before.set_label('Missing Values (NaN)')
-        cbar_after = plt.colorbar(heatmap_after, ax=ax)
+        cbar_after = plt.colorbar(heatmap_after, ax=ax2)
         cbar_after.set_label('Missing Values (NaN)')
 
-        ax.axis('off')  # Turn off axis labels for the second subplot
+        ax1.axis('off')  # Turn off axis labels for the first subplot
+        ax2.axis('off')  # Turn off axis labels for the second subplot
+
+        plt.show()
 
     def reduce(self, plot=False, *args, **kwargs):
         """
@@ -205,8 +214,10 @@ class MSA(pd.DataFrame):
         self.coordinates = self.analysis.transform(self.data)
 
         self.plots['analyse'] = plot  # Set a flag to indicate plotting
+        if plot:
+            self._plot_mca()
 
-    def _plot_mca(self, ax):
+    def _plot_mca(self):
         try:
             # Plot together the scatter plot of both sequences and residues overlaid
             self.analysis.plot(
@@ -266,15 +277,20 @@ class MSA(pd.DataFrame):
             self.labels = fcluster(model, best_k, criterion='maxclust')
 
         self.plots['get_labels'] = plot  # Set a flag to indicate plotting
+        if plot:
+            self._plot_sequence_labels()
 
-    def _plot_sequence_labels(self, ax):
+    def _plot_sequence_labels(self):
         """
         Generate and display cluster labels plot on the specified axes.
         """
-        ax.scatter(self.coordinates[:, 0], self.coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
-        ax.set_xlabel('Dimension 1')  # Use set_xlabel instead of xlabel
-        ax.set_ylabel('Dimension 2')  # Use set_ylabel instead of ylabel
-        ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")  # Use set_title instead of title
+        fig, ax = plt.subplots(figsize=(8, 6))  # Create a single subplot
+        coordinates = np.array(self.coordinates)
+        ax.scatter(coordinates[:, 0], coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
+        ax.set_xlabel('Dimension 1')
+        ax.set_ylabel('Dimension 2')
+        ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")
+        plt.show()
 
     def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False):
         """
@@ -293,12 +309,16 @@ class MSA(pd.DataFrame):
             metadata = pd.read_csv(path_to_metadata, delimiter='\t')
             self.wordcloud_data = {}
             for label in set(self.labels):
+                print("label")
                 indices = self.data.iloc[self.labels == label].index
+                print("indices")
                 headers = self.raw_data.index[indices]
+                print("headers")
                 # Perform a left join using different key column names
                 entry_names = [header.split('/')[0] for header in headers]
+                print("entry_names")
                 result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
-
+                print("result")
                 # Extract the substrate and enzyme names using regular expressions
                 matches = result[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
                 # String normalization pipeline
@@ -312,15 +332,20 @@ class MSA(pd.DataFrame):
                     .apply(lambda x: x.lower())
                 result['Label'] = result['Substrate'].str.cat(result['Enzyme'], sep=' ').str.strip()
                 result = result.copy()
-                self.wordcloud_data[label] = ' '.join(
+                print("result 2")
+                wordcloud_text = ' '.join(
                     sorted(
                         set([string for string in result.Label.values.tolist() if len(string) > 0])
                     )
                 )
+                print(wordcloud_text)
+                self.wordcloud_data[label] = wordcloud_text
 
             self.plots['generate_wordcloud'] = plot  # Set a flag to indicate plotting
+            if plot:
+                self._plot_wordclouds()
 
-    def _plot_wordclouds(self, ax):
+    def _plot_wordclouds(self):
         """
         Plot word clouds generated by the generate_wordclouds method.
 
@@ -335,19 +360,20 @@ class MSA(pd.DataFrame):
         fig, axs = plt.subplots(num_clusters, 1, figsize=(10, 6 * num_clusters))
 
         for i, (label, wordcloud_text) in enumerate(self.wordcloud_data.items()):
+            print(i, label, wordcloud_text)
             ax = axs[i] if num_clusters > 1 else axs  # Use a single subplot if there's only one cluster
 
             # Generate the word cloud for the current cluster
             wordcloud = WordCloud(
-                width=800,
-                height=400,
+                width=80,
+                height=40,
                 background_color='white'
             ).generate(wordcloud_text)
 
             # Plot the word cloud on the current subplot
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
-            ax.set_title(f'Cluster {label}')
+            ax.set_title(f'Wordcloud of Protein Names for Cluster {label}')
 
         # Adjust subplot layout
         plt.tight_layout()
@@ -400,8 +426,10 @@ class MSA(pd.DataFrame):
         self.sorted_importance = sorted_importance
 
         self.plots['select_features'] = plot  # Set a flag to indicate plotting
+        if plot:
+            self._plot_pareto()
 
-    def _plot_feature_selection(self, ax):
+    def _plot_pareto(self):
         """
         Generate and display feature selection plot on the specified axes.
         """
@@ -453,8 +481,10 @@ class MSA(pd.DataFrame):
         self.profiles.index = self.raw_data.index[self.data.index]
 
         self.plots['get_sdps'] = plot  # Set a flag to indicate plotting
+        if plot:
+            self._plot_selected_residues()
 
-    def _plot_selected_residues(self, ax):
+    def _plot_selected_residues(self):
         """
         Generate and display selected residues plot on the specified axes.
         """
@@ -478,7 +508,7 @@ class MSA(pd.DataFrame):
             c=self.labels,
             cmap='viridis',
             alpha=0.5,
-            label='Sequence Custers'
+            label='Clustered Sequence'
         )
         # Scatter plot of labeled residues
         plt.scatter(df_res[0], df_res[1], marker='x', color='black', s=50, label='Selected Residues')
@@ -505,8 +535,9 @@ class MSA(pd.DataFrame):
 
                 # Store the seq_logo in logos_data with the label as the key
                 self.logos_data[label] = data
+            self._plot_logos()
 
-    def _plot_logos(self, ax, color_scheme='NajafabadiEtAl2017'):
+    def _plot_logos(self, color_scheme='NajafabadiEtAl2017'):
         """
         Plot logos generated by the generate_logos method.
 
