@@ -571,7 +571,7 @@ class MSA(pd.DataFrame):
 
             # Customize subplot labels and title
             ax.set_xticks(range(len(msa_columns)))
-            ax.set_xticklabels(msa_columns)
+            ax.set_xticklabels(msa_columns, fontsize=24)
             # ax.set_title(f'Putative SDPs for cluster {label}')
 
         # # Set common X-axis label (if needed)
