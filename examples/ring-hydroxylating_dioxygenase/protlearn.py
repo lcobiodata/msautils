@@ -173,7 +173,7 @@ class MSA(pd.DataFrame):
     def _plot_cleanse_heatmaps(self):
         """
         Generate and display cleansing heatmaps plot on the specified axes.
-            """
+        """
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # Create a figure with two subplots
         fig.suptitle("Cleansing Heatmaps", fontsize=16)
 
@@ -187,10 +187,13 @@ class MSA(pd.DataFrame):
         heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
         ax2.set_title('After Cleansing')
 
-        # Add color bars to the right of the heatmaps
-        cbar_before = plt.colorbar(heatmap_before, ax=ax1)
+        # Create a shared color bar axis
+        cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # Adjust the position and size as needed
+
+        # Add color bars to the right of the heatmaps with the shared color bar axis
+        cbar_before = plt.colorbar(heatmap_before, cax=cax)
         cbar_before.set_label('Missing Values (NaN)')
-        cbar_after = plt.colorbar(heatmap_after, ax=ax2)
+        cbar_after = plt.colorbar(heatmap_after, cax=cax)  # Use the same color bar axis
         cbar_after.set_label('Missing Values (NaN)')
 
         ax1.axis('off')  # Turn off axis labels for the first subplot
@@ -309,16 +312,11 @@ class MSA(pd.DataFrame):
             metadata = pd.read_csv(path_to_metadata, delimiter='\t')
             self.wordcloud_data = {}
             for label in set(self.labels):
-                print("label")
                 indices = self.data.iloc[self.labels == label].index
-                print("indices")
                 headers = self.raw_data.index[indices]
-                print("headers")
                 # Perform a left join using different key column names
                 entry_names = [header.split('/')[0] for header in headers]
-                print("entry_names")
                 result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
-                print("result")
                 # Extract the substrate and enzyme names using regular expressions
                 matches = result[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
                 # String normalization pipeline
@@ -332,13 +330,11 @@ class MSA(pd.DataFrame):
                     .apply(lambda x: x.lower())
                 result['Label'] = result['Substrate'].str.cat(result['Enzyme'], sep=' ').str.strip()
                 result = result.copy()
-                print("result 2")
                 wordcloud_text = ' '.join(
                     sorted(
                         set([string for string in result.Label.values.tolist() if len(string) > 0])
                     )
                 )
-                print(wordcloud_text)
                 self.wordcloud_data[label] = wordcloud_text
 
             self.plots['generate_wordcloud'] = plot  # Set a flag to indicate plotting
@@ -360,13 +356,12 @@ class MSA(pd.DataFrame):
         fig, axs = plt.subplots(num_clusters, 1, figsize=(10, 6 * num_clusters))
 
         for i, (label, wordcloud_text) in enumerate(self.wordcloud_data.items()):
-            print(i, label, wordcloud_text)
             ax = axs[i] if num_clusters > 1 else axs  # Use a single subplot if there's only one cluster
 
             # Generate the word cloud for the current cluster
             wordcloud = WordCloud(
-                width=80,
-                height=40,
+                width=800,
+                height=400,
                 background_color='white'
             ).generate(wordcloud_text)
 
@@ -374,9 +369,6 @@ class MSA(pd.DataFrame):
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
             ax.set_title(f'Wordcloud of Protein Names for Cluster {label}')
-
-        # Adjust subplot layout
-        plt.tight_layout()
 
         # Show the plot
         plt.show()
@@ -554,7 +546,7 @@ class MSA(pd.DataFrame):
             raise ValueError(f"color scheme must be in {color_schemes_list}")
         # Create a figure and subplots for logos
         num_clusters = len(self.logos_data)
-        fig, axs = plt.subplots(num_clusters, 1, figsize=(8, 2 * num_clusters), sharex=True)
+        # fig, axs = plt.subplots(num_clusters, 1, figsize=(8, 2 * num_clusters), sharex=True)
 
         for i, (label, data) in enumerate(self.logos_data.items()):
             msa_columns = data.index.tolist()
@@ -570,21 +562,23 @@ class MSA(pd.DataFrame):
             # Customize the appearance of the logo
             seq_logo.style_spines(visible=False)
 
-            ax = axs[i] if num_clusters > 1 else axs  # Use a single subplot if there's only one cluster
+            # Get the axes from the logo object
+            ax = seq_logo.ax
+            # ax = axs[i] if num_clusters > 1 else axs  # Use a single subplot if there's only one cluster
 
-            # Plot the sequence logo on the current subplot
-            seq_logo.plot(ax=ax)
+            # # Plot the sequence logo on the current subplot
+            # seq_logo.plot(ax=ax)
 
             # Customize subplot labels and title
             ax.set_xticks(range(len(msa_columns)))
             ax.set_xticklabels(msa_columns)
-            ax.set_title(f'Cluster {label}')
+            ax.set_title(f'Putative SDPs for cluster {label}')
 
-        # Set common X-axis label (if needed)
-        fig.text(0.5, 0.04, 'Residue Position', ha='center')
+        # # Set common X-axis label (if needed)
+        # fig.text(0.5, 0.04, 'Residue Position', ha='center')
 
-        # Adjust subplot layout
-        plt.tight_layout()
+        # # Adjust subplot layout
+        # plt.tight_layout()
 
         # Show the plot
         plt.show()
