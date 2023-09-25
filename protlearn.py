@@ -115,7 +115,7 @@ class MSA(pd.DataFrame):
         sequence's starting position.
 
         The 'positions_map' is a dictionary with sequence headers as keys and a sub-dictionary
-        as values. The sub-dictionary contains residue names (keys) and their corresponding
+        as values. The sub-dictionary contains MSA columns (keys) and their corresponding
         positions (values).
 
         For example:

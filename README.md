@@ -95,13 +95,13 @@ based on the sequence headers, which typically include information about the
 sequence's starting position.
 
 The 'positions_map' is a dictionary with sequence headers as keys and a sub-dictionary
-as values. The sub-dictionary contains residue names (keys) and their corresponding
+as values. The sub-dictionary contains MSA columns (keys) and their corresponding
 positions (values).
 
 For example:
 {
-'Seq1/1-100': {'A': 1, 'C': 2, ...},
-'Seq2/101-200': {'A': 101, 'C': 102, ...},
+  'Seq1/1-100': {1: 1, 2: 2, ...},
+  'Seq2/101-200': {101: 1, 102: 2, ...},
 ...
 }
 
