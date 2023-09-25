@@ -40,6 +40,7 @@ from collections import defaultdict
 import logomaker as lm
 import sys
 import argparse
+import json
 
 # Download necessary resources from NLTK
 nltk.download('punkt')
@@ -548,7 +549,7 @@ class MSA(pd.DataFrame):
 
         # Bar chart of percentage importance
         xvalues = range(len(sorted_features))
-        ax1.bar(xvalues, self.sorted_importance, color='b')
+        ax1.bar(xvalues, self.sorted_importance, color='cyan')
         ax1.set_ylabel('Summed Importance', fontsize=16)
         ax1.tick_params(axis='y', labelsize=12)
 
@@ -556,7 +557,7 @@ class MSA(pd.DataFrame):
         ax2 = ax1.twinx()
 
         # Line chart of cumulative percentage importance
-        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color='r', marker='.')
+        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color='magenta', marker='.')
         ax2.set_ylabel('Cumulative Importance', fontsize=16)
         ax2.tick_params(axis='y', labelsize=12)
 
@@ -625,7 +626,7 @@ class MSA(pd.DataFrame):
             c=self.labels,
             cmap='viridis',
             alpha=0.5,
-            label='Clustered Sequence'
+            label='Clustered Sequences'
         )
         # Scatter plot of labeled residues
         plt.scatter(df_res[0], df_res[1], marker='x', color='black', s=50, label='Selected Residues')
@@ -739,6 +740,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Process Multiple Sequence Alignment (MSA) data.")
     parser.add_argument("msa_file", type=str, help="Path to the MSA file")
+    parser.add_argument("metadata_file", type=str, help="Path to the metadata file in tsv format.")
     parser.add_argument("--plot-cleanse", action="store_true", help="Plot cleanse data")
     parser.add_argument("--plot-reduce", action="store_true", help="Plot data reduction")
     parser.add_argument("--plot-label", action="store_true", help="Plot sequence labels")
