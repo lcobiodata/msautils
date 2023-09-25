@@ -181,19 +181,27 @@ class MSA(pd.DataFrame):
 
         # Replace specified characters with NaN
         self.dirty.replace(to_remove, np.nan, inplace=True)
-
-        # Calculate the minimum number of non-NaN values for rows and columns
-        min_rows = int(threshold * self.dirty.shape[0])
-        min_cols = int(threshold * self.dirty.shape[1])
+        # print(f"self.dirty.shape after replacing specified characters with NaN: {self.dirty.shape}")
 
         # Create a copy of 'dirty' data as the 'clean' data
         self.clean = self.dirty.copy()
+        # print(f"self.clean.shape right after creating a copy of 'dirty' data as the 'clean' data: {self.clean.shape}")
+
+        # Calculate the minimum number of non-NaN values for rows
+        min_rows = int(threshold * self.clean.shape[0])
+        # print(f"min_rows: {min_rows}")
 
         # Remove columns with NaN values above the threshold
         self.clean.dropna(thresh=min_rows, axis=1, inplace=True)
+        # print(f"self.clean.shape after removing columns with NaN values above the threshold: {self.clean.shape}")
+
+        # Calculate the minimum number of non-NaN values for columns
+        min_cols = int(threshold * self.clean.shape[1])
+        # print(f"min_cols: {min_cols}")
 
         # Remove rows with NaN values above the threshold
         self.clean.dropna(thresh=min_cols, axis=0, inplace=True)
+        # print(f"self.clean.shape after removing rows with NaN values above the threshold: {self.clean.shape}")
 
         # Reset the index, drop duplicates, and fill NaN values with '-'
         self.data = self.clean.reset_index(drop=True) \
