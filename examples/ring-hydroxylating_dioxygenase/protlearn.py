@@ -175,17 +175,17 @@ class MSA(pd.DataFrame):
         Generate and display cleansing heatmaps plot on the specified axes.
         """
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # Create a figure with two subplots
-        fig.suptitle("Cleansing Heatmaps", fontsize=16)
+        # fig.suptitle("Cleansing Heatmaps", fontsize=16)
 
         # Create the heatmap before cleansing on the first Axes
         ax1 = axes[0]  # First subplot
         heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
-        ax1.set_title('Before Cleansing')
+        # ax1.set_title('Before Cleansing')
 
         # Create the heatmap after cleansing on the second Axes
         ax2 = axes[1]  # Second subplot
         heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
-        ax2.set_title('After Cleansing')
+        # ax2.set_title('After Cleansing')
 
         # Create a shared color bar axis
         cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # Adjust the position and size as needed
@@ -292,7 +292,7 @@ class MSA(pd.DataFrame):
         ax.scatter(coordinates[:, 0], coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
         ax.set_xlabel('Dimension 1')
         ax.set_ylabel('Dimension 2')
-        ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")
+        # ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")
         plt.show()
 
     def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False):
@@ -368,7 +368,7 @@ class MSA(pd.DataFrame):
             # Plot the word cloud on the current subplot
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
-            ax.set_title(f'Wordcloud of Protein Names for Cluster {label}')
+            # ax.set_title(f'Wordcloud of Protein Names for Cluster {label}')
 
         # Show the plot
         plt.show()
@@ -509,7 +509,7 @@ class MSA(pd.DataFrame):
         # Set labels and title
         plt.xlabel('Dimension 1')
         plt.ylabel('Dimension 2')
-        plt.title('Conceptual Map of Clustered Sequences and Selected Residues')
+        # plt.title('Conceptual Map of Clustered Sequences and Selected Residues')
         # Show the plot
         plt.legend()
         plt.grid()
@@ -572,7 +572,7 @@ class MSA(pd.DataFrame):
             # Customize subplot labels and title
             ax.set_xticks(range(len(msa_columns)))
             ax.set_xticklabels(msa_columns)
-            ax.set_title(f'Putative SDPs for cluster {label}')
+            # ax.set_title(f'Putative SDPs for cluster {label}')
 
         # # Set common X-axis label (if needed)
         # fig.text(0.5, 0.04, 'Residue Position', ha='center')
