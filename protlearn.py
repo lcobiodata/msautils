@@ -123,7 +123,7 @@ class MSA(pd.DataFrame):
 
         # Iterate through sequence headers and sequences
         for header in self.index:
-            if re.search(r'/.+/\d+-\d+', header):
+            if re.search(r'.+/.+\d+-\d+', header):
                 sequence = self.loc[header]
 
                 # Extract the starting position from the header
@@ -139,15 +139,15 @@ class MSA(pd.DataFrame):
 
     def cleanse(self, indel='-', remove_lowercase=True, threshold=.9, plot=False, save=False, show=False):
         """
-        Cleanse the MSA data by removing columns and rows with missing values.
+        Cleanse the MSA data by removing columns and rows with gaps/indels.
 
         Parameters:
             indel (str, optional): The character representing gaps/indels (default is '-').
             remove_lowercase (bool, optional): Whether to remove lowercase characters (default is True).
-            threshold (float, optional): The threshold for missing values (default is 0.9).
-            plot (bool, optional): Whether to plot a heatmap of missing values (default is False).
-            save (bool, optional): Whether to save a heatmap of missing values (default is False).
-            show (bool, optional): Whether to show a heatmap of missing values (default is False).
+            threshold (float, optional): The threshold for gaps/indels (default is 0.9).
+            plot (bool, optional): Whether to plot a heatmap of gaps/indels (default is False).
+            save (bool, optional): Whether to save a heatmap of gaps/indels (default is False).
+            show (bool, optional): Whether to show a heatmap of gaps/indels (default is False).
         """
         # Define characters to remove based on parameters
         to_remove = [indel]
@@ -215,9 +215,9 @@ class MSA(pd.DataFrame):
 
         # Add color bars to the right of the heatmaps with the shared color bar axis
         cbar_before = plt.colorbar(heatmap_before, cax=cax)
-        cbar_before.set_label('Missing Values (NaN)')
+        cbar_before.set_label('Gaps/Indels (NaN)')
         cbar_after = plt.colorbar(heatmap_after, cax=cax)  # Use the same color bar axis
-        cbar_after.set_label('Missing Values (NaN)')
+        cbar_after.set_label('Gaps/Indels (NaN)')
 
         ax1.axis('off')  # Turn off axis labels for the first subplot
         ax2.axis('off')  # Turn off axis labels for the second subplot
@@ -279,8 +279,7 @@ class MSA(pd.DataFrame):
         finally:
             pass
 
-    def label_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False, save=False,
-                        show=False):
+    def label_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage'):
         """
         Cluster the MSA data and obtain cluster labels.
 
@@ -288,9 +287,6 @@ class MSA(pd.DataFrame):
             min_clusters (int, optional): Minimum number of clusters (default is 2).
             max_clusters (int, optional): Maximum number of clusters (default is 10).
             method (str, optional): Clustering method ('k-means' or 'single-linkage') (default is 'single-linkage').
-            plot (bool, optional): Whether to plot the clustering results (default is False).
-            save (bool, optional): Whether to save the clustering results (default is False).
-            show (bool, optional): Whether to show the clustering results (default is False).
 
         Notes:
         - This method performs clustering on the MSA data and assigns cluster labels to sequences.
@@ -343,33 +339,6 @@ class MSA(pd.DataFrame):
 
         if plot:
             self._plot_sequence_labels(save=save, show=show)
-
-    def _plot_sequence_labels(self, save=False, show=False):
-        """
-        Generate and display a cluster labels plot on the specified axes.
-
-        Notes:
-        - This method generates a scatter plot of sequences based on MCA coordinates,
-            with points colored by cluster labels.
-        - It provides a visualization of the clustering results.
-
-        Example:
-        msa = MSA('example.fasta')
-        msa.map_positions()
-        msa.cleanse()
-        msa.label_sequences(method='single-linkage', min_clusters=3, plot=True)
-        """
-        fig, ax = plt.subplots(figsize=(8, 6))  # Create a single subplot
-        ax.scatter(self.coordinates[:, 0], self.coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
-        ax.set_xlabel('Dimension 1')
-        ax.set_ylabel('Dimension 2')
-        # ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")
-
-        if show:
-            plt.show()
-
-        if save:
-            plt.savefig("./output/sequence_labels.png")
 
     def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False, save=False, show=False):
         """
@@ -738,7 +707,7 @@ def main():
     }
     msa.cleanse(**common_arguments)
     msa.reduce(plot=arguments.plot)
-    msa.label_sequences(method='single-linkage', min_clusters=3, **common_arguments)
+    msa.label_sequences(method='single-linkage', min_clusters=3)
     if arguments.metadata_file:
         msa.generate_wordclouds(path_to_metadata=arguments.metadata_file, **common_arguments)
     msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
