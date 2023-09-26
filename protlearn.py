@@ -764,23 +764,23 @@ def main():
     usage = "python your_script.py MSA_FILE [OPTIONS]"
     parser.usage = usage
 
-    args = parser.parse_args()
+    arguments = parser.parse_args()
 
     # Create data frame from raw data and clean it
-    msa_file = args.msa_file
+    msa_file = arguments.msa_file
     msa = MSA()
     msa.parse_msa_file(msa_file)
     msa.map_positions()
     common_arguments = {
-        'plot': args.plot,
-        'save': args.save,
-        'show': args.show
+        'plot': arguments.plot,
+        'save': arguments.save,
+        'show': arguments.show
     }
     msa.cleanse_data(**common_arguments)
-    msa.reduce(plot=args.plot)  # , save=args.save, show=args.show)
+    msa.reduce(plot=arguments.plot)  # , save=arguments.save, show=arguments.show)
     msa.label_sequences(method='single-linkage', min_clusters=3, **common_arguments)
-    if args.metadata_file:
-        msa.generate_wordclouds(path_to_metadata=args.metadata_file, **common_arguments)
+    if arguments.metadata_file:
+        msa.generate_wordclouds(path_to_metadata=arguments.metadata_file, **common_arguments)
     msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
     msa.select_residues(top_n=3, **common_arguments)
     msa.generate_logos(**common_arguments)
