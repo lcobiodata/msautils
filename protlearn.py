@@ -587,13 +587,14 @@ class MSA(pd.DataFrame):
         # Filter the selected features to get the 'top_n' most important residues
         self.selected_columns = selected_columns if top_n is None else selected_columns[:top_n]
         # Create an empty DataFrame with columns
-        self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
+        # self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
+        self.profiles = pd.DataFrame(columns=self.selected_columns)
         # Iterate through rows of msa.data
         for index, row in self.data[self.selected_columns].iterrows():
             header = self.raw_data.index[index]
             series = pd.Series(
                 {col: f"{seq3(aa)}{self.positions_map[header].get(col, '?')}" for col, aa in row.items()}
-            ).sort_index()
+            )#.sort_index()
             self.profiles = pd.concat([self.profiles, series.to_frame().T], axis=0)
         # Set the custom index to the resulting DataFrame
         self.profiles.index = self.raw_data.index[self.data.index]
