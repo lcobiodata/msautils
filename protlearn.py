@@ -744,39 +744,15 @@ class MSA(pd.DataFrame):
             plt.savefig("./output/sdp_logos.png")
 
 
-def main(args):
+def main():
     """
     Main function to process the Multiple Sequence Alignment (MSA) data.
-
-    Args:
-        args: Command-line arguments parsed by argparse.
 
     This function performs a series of data processing and analysis steps on the MSA data,
     including parsing, cleansing, dimension reduction, clustering, word cloud generation,
     feature selection, selecting residues, and generating logos.
     """
-    # Create data frame from raw data and clean it
-    msa_file = args.msa_file
-    msa = MSA()
-    msa.parse_msa_file(msa_file)
-    msa.map_positions()
-    msa.cleanse_data(plot=args.plot, save=args.save, show=args.show)
-    msa.reduce(plot=args.plot)  # , save=args.save, show=args.show)
-    msa.label_sequences(method='single-linkage', min_clusters=3, plot=args.plot, save=args.save, show=args.show)
-    if args.metadata_file:
-        msa.generate_wordclouds(path_to_metadata=args.metadata_file, plot=args.plot, save=args.save, show=args.show)
-    msa.select_features(n_estimators=1000, random_state=42, plot=args.plot, save=args.save, show=args.show)
-    msa.select_residues(top_n=3, plot=args.plot, save=args.save, show=args.show)
-    msa.generate_logos(plot=args.plot, save=args.save, show=args.show)
-
-
-def parse_args():
-    """
-    Parse command-line arguments using argparse.
-
-    Returns:
-        Namespace: An object containing parsed command-line arguments.
-    """
+    # Define command-line arguments
     parser = argparse.ArgumentParser(description="Process Multiple Sequence Alignment (MSA) data.")
     parser.add_argument("msa-file", type=str, help="Path to the MSA file")
     parser.add_argument("--metadata-file", type=str, help="Path to the metadata file in tsv format.")
@@ -788,13 +764,33 @@ def parse_args():
     usage = "python your_script.py MSA_FILE [OPTIONS]"
     parser.usage = usage
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Create data frame from raw data and clean it
+    msa_file = args.msa_file
+    msa = MSA()
+    msa.parse_msa_file(msa_file)
+    msa.map_positions()
+    common_arguments = {
+        'plot': args.plot,
+        'save': args.save,
+        'show': args.show
+    }
+    msa.cleanse_data(**common_arguments)
+    msa.reduce(plot=args.plot)  # , save=args.save, show=args.show)
+    msa.label_sequences(method='single-linkage', min_clusters=3, **common_arguments)
+    if args.metadata_file:
+        msa.generate_wordclouds(path_to_metadata=args.metadata_file, **common_arguments)
+    msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
+    msa.select_residues(top_n=3, **common_arguments)
+    msa.generate_logos(**common_arguments)
+
+    return True
 
 
 if __name__ == "__main__":
     try:
-        args = parse_args()
-        main(args)
+        sys.exit(0 if main() else 1)
     except Exception as e:
         print(f"An error occurred: {type(e).__name__} - {e}")
-        sys.exit(1)
+        sys.exit(2)
