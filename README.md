@@ -180,7 +180,7 @@ Cluster the MSA data and obtain cluster labels.
 #### generate\_wordclouds
 
 ```python
-def generate_wordclouds(path_to_metadata=None,
+def generate_wordclouds(metadata=None,
                         column='Protein names',
                         plot=False,
                         save=False,
@@ -191,7 +191,7 @@ Generate word cloud visualizations from protein names in a DataFrame.
 
 **Arguments**:
 
-- `path_to_metadata` _str, default=None_ - Path to metadata file in tsv format.
+- `metadata` _str, default=None_ - Path to metadata file in tsv format.
 - `column` _str, default='Protein names'_ - The name of the column in the DataFrame containing protein names.
 - `plot` _bool, default=False_ - Whether to plot word clouds.
 - `save` _bool, default=False_ - Whether to save word clouds.
@@ -207,7 +207,7 @@ Generate word cloud visualizations from protein names in a DataFrame.
   msa.map_positions()
   msa.cleanse()
   msa.cluster_sequences(method='single-linkage', min_clusters=3)
-  msa.generate_wordclouds(path_to_metadata='metadata.tsv', plot=True)
+  msa.generate_wordclouds(metadata='metadata.tsv', plot=True)
 
 <a id="protlearn.MSA.select_features"></a>
 
