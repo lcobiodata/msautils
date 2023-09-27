@@ -130,7 +130,7 @@ Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce
 **Notes**:
 
   - Multidimensional Correspondence Analysis (MCA) is used to reduce the dimensionality of the MSA data.
-  - The MCA results are stored in the 'analysis' attribute of the MSA object.
+  - The MCA results are stored in the 'mca' attribute of the MSA object.
   - The row coordinates after reduction are stored in the 'coordinates' attribute.
   
 
