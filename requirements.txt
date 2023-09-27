@@ -16,3 +16,4 @@ prince~=0.10.5
 logomaker~=0.8
 nglview~=2.7.7
 IPython~=8.14.0
+wordcloud~=1.9.2
