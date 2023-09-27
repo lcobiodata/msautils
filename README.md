@@ -1,18 +1,3 @@
-# Table of Contents
-
-* [protlearn](#protlearn)
-  * [MSA](#protlearn.MSA)
-    * [\_\_init\_\_](#protlearn.MSA.__init__)
-    * [map\_positions](#protlearn.MSA.map_positions)
-    * [cleanse](#protlearn.MSA.cleanse)
-    * [reduce](#protlearn.MSA.reduce)
-    * [label\_sequences](#protlearn.MSA.cluster_sequences)
-    * [generate\_wordclouds](#protlearn.MSA.generate_wordclouds)
-    * [select\_features](#protlearn.MSA.select_features)
-    * [select\_residues](#protlearn.MSA.select_residues)
-    * [generate\_logos](#protlearn.MSA.generate_logos)
-  * [main](#protlearn.main)
-
 <a id="protlearn"></a>
 
 # protlearn
