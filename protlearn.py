@@ -679,11 +679,13 @@ class MSA(pd.DataFrame):
             ax.set_xticks(range(len(msa_columns)))
             ax.set_xticklabels(msa_columns, fontsize=24)
 
+            if save:
+                plt.savefig(f"./output/sdp_logo_{label}.png")
+
         if show:
             plt.show()
 
-        if save:
-            plt.savefig("./output/sdp_logos.png")
+
 
 
 def main():
