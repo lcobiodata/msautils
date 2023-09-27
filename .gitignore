@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 old/*
 examples/ring-hydroxylating_dioxygenase/example-ring-hydroxylating-dioxygenase-checkpoint.ipynb
 protlearn.iml
 .gitignore
-.idea
-=======
-old/
-.idea
->>>>>>> main
+.idea/
