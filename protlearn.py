@@ -123,19 +123,19 @@ class MSA(pd.DataFrame):
 
         # Iterate through sequence headers and sequences
         for header in self.index:
-            if re.search(r'.+/.+\d+-\d+', header):
+            if re.search(r'.+/\d+-\d+', header):
                 sequence = self.loc[header]
 
                 # Extract the starting position from the header
-                offset = int(header.split('/')[1].split('-')[0])
-                count = offset - 1
+                offset, _ = header.split('/')[1].split('-')
+                position = int(offset) - 1  # offset
 
                 # Iterate through residues in the sequence
                 for index, value in zip(sequence.index, sequence.values):
                     if value != '-':
-                        count += 1
+                        position += 1
                         # Store the residue position in the positions_map dictionary
-                        self.positions_map[header][index] = count
+                        self.positions_map[header][index] = position
 
     def cleanse(self, indel='-', remove_lowercase=True, threshold=.9, plot=False, save=False, show=False):
         """
@@ -215,9 +215,9 @@ class MSA(pd.DataFrame):
 
         # Add color bars to the right of the heatmaps with the shared color bar axis
         cbar_before = plt.colorbar(heatmap_before, cax=cax)
-        cbar_before.set_label('Gaps/Indels (NaN)')
+        cbar_before.set_label('Gaps (Indels)')
         cbar_after = plt.colorbar(heatmap_after, cax=cax)  # Use the same color bar axis
-        cbar_after.set_label('Gaps/Indels (NaN)')
+        cbar_after.set_label('Gaps (Indels)')
 
         ax1.axis('off')  # Turn off axis labels for the first subplot
         ax2.axis('off')  # Turn off axis labels for the second subplot
@@ -279,7 +279,7 @@ class MSA(pd.DataFrame):
         finally:
             pass
 
-    def label_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage'):
+    def cluster_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage'):
         """
         Cluster the MSA data and obtain cluster labels.
 
@@ -298,7 +298,7 @@ class MSA(pd.DataFrame):
         msa = MSA('example.fasta')
         msa.map_positions()
         msa.cleanse()
-        msa.label_sequences(method='single-linkage', min_clusters=3, plot=True)
+        msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True)
         """
         if method not in ['k-means', 'single-linkage']:
             raise ValueError("method must be 'k-means' or 'single-linkage")
@@ -337,9 +337,6 @@ class MSA(pd.DataFrame):
             # Get the cluster labels for each sequence in the MSA
             self.labels = fcluster(model, best_k, criterion='maxclust')
 
-        if plot:
-            self._plot_sequence_labels(save=save, show=show)
-
     def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False, save=False, show=False):
         """
         Generate word cloud visualizations from protein names in a DataFrame.
@@ -358,7 +355,7 @@ class MSA(pd.DataFrame):
         msa = MSA('example.fasta')
         msa.map_positions()
         msa.cleanse()
-        msa.label_sequences(method='single-linkage', min_clusters=3)
+        msa.cluster_sequences(method='single-linkage', min_clusters=3)
         msa.generate_wordclouds(path_to_metadata='metadata.tsv', plot=True)
         """
         # Read the TSV file into a DataFrame
@@ -547,22 +544,20 @@ class MSA(pd.DataFrame):
         # Filter the selected features to get the 'top_n' most important residues
         self.selected_columns = selected_columns if top_n is None else selected_columns[:top_n]
         # Create an empty DataFrame with columns
-        # self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
-        self.profiles = pd.DataFrame(columns=self.selected_columns)
-        # Iterate through rows of msa.data
-        for index, row in self.unique_sequences[self.selected_columns].iterrows():
-            header = self.index[index]
+        self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
+        # Iterate through rows of msa
+        for header, row in self[sorted(self.selected_columns)].iterrows():
+            pos_map = self.positions_map.get(header, {})
             series = pd.Series(
-                {col: f"{seq3(aa)}{self.positions_map[header].get(col, '?')}" for col, aa in row.items()}
-            )  # .sort_index()
+                {col: f"{seq3(aa)}{pos_map.get(col, '?')}" for col, aa in row.items()}
+            )
             self.profiles = pd.concat([self.profiles, series.to_frame().T], axis=0)
-        # Set the custom index to the resulting DataFrame
-        self.profiles.index = self.index[self.unique_sequences.index]
+        self.profiles.index = self.index
 
         if plot:
-            self._plot_selected_residues(save=save, show=show)
+            self._plot_perceptual_map(save=save, show=show)
 
-    def _plot_selected_residues(self, save=False, show=False):
+    def _plot_perceptual_map(self, save=False, show=False):
         """
         Generate and display selected residues plot on the specified axes.
         """
@@ -576,27 +571,45 @@ class MSA(pd.DataFrame):
             three_letter_aa = seq3(amino_acid)
             residues.append(three_letter_aa + msa_column)
         df_res = df_res.set_index(pd.Index(residues))
+
         # Create figure
         plt.figure(figsize=(8, 6))
-        # Scatter plot of sequences colored by cluster labels
-        plt.scatter(
-            self.coordinates[:, 0],
-            self.coordinates[:, 1],
-            c=self.labels,
-            cmap='viridis',
-            alpha=0.5,
-            label='Clustered Sequences'
-        )
+
+        # Create legends for cluster labels
+        unique_labels = set(self.labels)
+        legend_handles = []
+        # Iterate through unique labels
+        for label in unique_labels:
+            # Find indices where the labels array matches the current label
+            indices = np.where(self.labels == label)[0]
+            plt.scatter(
+                self.coordinates[indices, 0],
+                self.coordinates[indices, 1],
+                color=plt.cm.viridis(label / len(unique_labels)),
+                alpha=0.5
+            )
+            legend_handles.append(
+                plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {label}', markersize=10,
+                           markerfacecolor=plt.cm.viridis(label / len(unique_labels)))
+            )
+
         # Scatter plot of labeled residues
-        plt.scatter(df_res[0], df_res[1], marker='x', color='black', s=50, label='Selected Residues')
+        plt.scatter(df_res[0], df_res[1], marker='*', color='black', s=50)
+
+        # Annotate labeled residues
         for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
             plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
+
+        legend_handles.append(
+            plt.Line2D([0], [0], marker='*', color='k', label='Selected Residues', markersize=10)
+        )
+
         # Set labels and title
         plt.xlabel('Dimension 1')
         plt.ylabel('Dimension 2')
-        # plt.title('Conceptual Map of Clustered Sequences and Selected Residues')
 
-        plt.legend()
+        plt.legend(handles=legend_handles, title='Sequence Clusters')
+
         plt.grid()
 
         if show:
@@ -707,7 +720,7 @@ def main():
     }
     msa.cleanse(**common_arguments)
     msa.reduce(plot=arguments.plot)
-    msa.label_sequences(method='single-linkage', min_clusters=3)
+    msa.cluster_sequences(method='single-linkage', min_clusters=3)
     if arguments.metadata_file:
         msa.generate_wordclouds(path_to_metadata=arguments.metadata_file, **common_arguments)
     msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
