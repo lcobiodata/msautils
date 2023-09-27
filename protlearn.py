@@ -709,9 +709,7 @@ def main():
     arguments = parser.parse_args()
 
     # Create data frame from raw data and clean it
-    msa_file = arguments.msa_file
-    msa = MSA()
-    msa.parse_msa_file(msa_file)
+    msa = MSA(arguments.msa_file)
     msa.map_positions()
     common_arguments = {
         'plot': arguments.plot,
