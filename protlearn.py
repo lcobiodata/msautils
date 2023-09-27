@@ -337,12 +337,12 @@ class MSA(pd.DataFrame):
             # Get the cluster labels for each sequence in the MSA
             self.labels = fcluster(model, best_k, criterion='maxclust')
 
-    def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False, save=False, show=False):
+    def generate_wordclouds(self, metadata=None, column='Protein names', plot=False, save=False, show=False):
         """
         Generate word cloud visualizations from protein names in a DataFrame.
 
         Parameters:
-            path_to_metadata (str, default=None): Path to metadata file in tsv format.
+            metadata (str, default=None): Path to metadata file in tsv format.
             column (str, default='Protein names'): The name of the column in the DataFrame containing protein names.
             plot (bool, default=False): Whether to plot word clouds.
             save (bool, default=False): Whether to save word clouds.
@@ -356,11 +356,11 @@ class MSA(pd.DataFrame):
         msa.map_positions()
         msa.cleanse()
         msa.cluster_sequences(method='single-linkage', min_clusters=3)
-        msa.generate_wordclouds(path_to_metadata='metadata.tsv', plot=True)
+        msa.generate_wordclouds(metadata='metadata.tsv', plot=True)
         """
         # Read the TSV file into a DataFrame
-        if path_to_metadata is not None:
-            metadata = pd.read_csv(path_to_metadata, delimiter='\t')
+        if metadata is not None:
+            metadata = pd.read_csv(metadata, delimiter='\t')
             self.wordcloud_data = {}
 
             # Process data for each cluster
@@ -720,7 +720,7 @@ def main():
     msa.reduce(plot=arguments.plot)
     msa.cluster_sequences(method='single-linkage', min_clusters=3)
     if arguments.metadata:
-        msa.generate_wordclouds(path_to_metadata=arguments.metadata, **common_arguments)
+        msa.generate_wordclouds(metadata=arguments.metadata, **common_arguments)
     msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
     msa.select_residues(top_n=3, **common_arguments)
     msa.generate_logos(**common_arguments)
