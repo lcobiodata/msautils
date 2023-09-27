@@ -40,7 +40,6 @@ from collections import defaultdict
 import logomaker as lm
 import sys
 import argparse
-import json
 
 # Download necessary resources from NLTK
 nltk.download('punkt')
@@ -54,7 +53,7 @@ class MSA(pd.DataFrame):
     A class for processing and analyzing Multiple Sequence Alignments (MSA).
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, msa_file, msa_format="fasta", *args, **kwargs):
         """
         Initialize the MSA object.
 
@@ -62,49 +61,29 @@ class MSA(pd.DataFrame):
             *args: Variable-length positional arguments.
             **kwargs: Variable-length keyword arguments.
         """
-        super().__init__(*args, **kwargs)
-        self.msa_file = None  # Path to the MSA file
-        self.raw_data = None  # Raw data from the MSA
+        headers = []
+        sequences = []
+
+        # Parse the MSA file and extract headers and sequences
+        for record in SeqIO.parse(msa_file, msa_format, *args, **kwargs):
+            headers.append(record.id)
+            sequences.append(record.seq)
+
+        # Initialize the DataFrame part of the MSA class
+        super().__init__(data=np.array(sequences), index=headers)
         self.positions_map = None  # Mapping of positions in the MSA
         self.dirty = None  # Dirty data (before cleansing)
         self.clean = None  # Clean data (after cleansing)
-        self.data = None  # Processed MSA data
-        self.alphabet = None  # Alphabet used in the MSA
-        self.analysis = None  # Analysis results
+        self.unique_sequences = None  # Processed MSA data
+        self.mca = None  # Analysis results
         self.coordinates = None  # Reduced data coordinates
         self.labels = None  # Sequence labels or clusters
         self.sorted_importance = None  # Sorted feature importances
         self.selected_features = None  # Selected features
         self.selected_columns = None  # Selected columns from the data
         self.profiles = None  # Residue profiles
-        # self.clusters = None  # Clusters (uncomment if needed)
         self.wordcloud_data = None  # Word cloud data
         self.logos_data = None  # Logo data
-        self.plots = None  # Plots and visualizations
-
-    def parse_msa_file(self, msa_file, msa_format="fasta", *args, **kwargs):
-        """
-        Parse an MSA file and store the raw data in the MSA object.
-
-        Args:
-            msa_file (str): The path to the MSA file.
-            msa_format (str, optional): The format of the MSA file (default is "fasta").
-            *args: Additional positional arguments to pass to SeqIO.parse.
-            **kwargs: Additional keyword arguments to pass to SeqIO.parse.
-        """
-        self.msa_file = msa_file  # Store the path to the MSA file
-        headers, sequences = [], []
-
-        # Parse the MSA file and extract headers and sequences
-        for record in SeqIO.parse(self.msa_file, msa_format, *args, **kwargs):
-            headers.append(record.id)
-            sequences.append(record.seq)
-
-        # Create a DataFrame to store the raw MSA data with sequences as rows and headers as index
-        self.raw_data = pd.DataFrame(np.array(sequences), index=headers)
-
-        # Initialize a dictionary to store plots and visualizations
-        self.plots = defaultdict(list)
 
     def map_positions(self):
         """
@@ -121,8 +100,8 @@ class MSA(pd.DataFrame):
 
         For example:
         {
-            'Seq1/1-100': {'A': 1, 'C': 2, ...},
-            'Seq2/101-200': {'A': 101, 'C': 102, ...},
+            'Seq1/1-100': {21: 1, 25: 2, ...},
+            'Seq2/171-432': {101: 171, 103: 172, ...},
             ...
         }
 
@@ -133,8 +112,7 @@ class MSA(pd.DataFrame):
         - Residues represented by '-' (indels/gaps) are not included in the mapping.
 
         Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
+        msa = MSA('example.fasta')
         msa.map_positions()
 
         Access the mapping:
@@ -144,41 +122,44 @@ class MSA(pd.DataFrame):
         self.positions_map = defaultdict(dict)
 
         # Iterate through sequence headers and sequences
-        for header in self.raw_data.index:
-            sequence = self.raw_data.loc[header]
+        for header in self.index:
+            if re.search(r'.+/\d+-\d+', header):
+                sequence = self.loc[header]
 
-            # Extract the starting position from the header
-            offset = int(header.split('/')[1].split('-')[0])
-            count = offset - 1
+                # Extract the starting position from the header
+                offset, _ = header.split('/')[1].split('-')
+                position = int(offset) - 1  # offset
 
-            # Iterate through residues in the sequence
-            for index, value in zip(sequence.index, sequence.values):
-                if value != '-':
-                    count += 1
-                    # Store the residue position in the positions_map dictionary
-                    self.positions_map[header][index] = count
+                # Iterate through residues in the sequence
+                for index, value in zip(sequence.index, sequence.values):
+                    if value != '-':
+                        position += 1
+                        # Store the residue position in the positions_map dictionary
+                        self.positions_map[header][index] = position
 
-    def cleanse_data(self, indel='-', remove_lowercase=True, threshold=.9, plot=False):
+    def cleanse(self, indel='-', remove_lowercase=True, threshold=.9, plot=False, save=False, show=False):
         """
-        Cleanse the MSA data by removing columns and rows with missing values.
+        Cleanse the MSA data by removing columns and rows with gaps/indels.
 
         Parameters:
             indel (str, optional): The character representing gaps/indels (default is '-').
             remove_lowercase (bool, optional): Whether to remove lowercase characters (default is True).
-            threshold (float, optional): The threshold for missing values (default is 0.9).
-            plot (bool, optional): Whether to plot a heatmap of missing values (default is False).
+            threshold (float, optional): The threshold for gaps/indels (default is 0.9).
+            plot (bool, optional): Whether to plot a heatmap of gaps/indels (default is False).
+            save (bool, optional): Whether to save a heatmap of gaps/indels (default is False).
+            show (bool, optional): Whether to show a heatmap of gaps/indels (default is False).
         """
         # Define characters to remove based on parameters
         to_remove = [indel]
 
         # Create a copy of the raw data as the 'dirty' data
-        self.dirty = self.raw_data.copy()
+        self.dirty = self.copy()
 
         # Check if lowercase characters should be removed
         if remove_lowercase:
             to_remove += [chr(i) for i in range(ord('a'), ord('z') + 1)]
         else:
-            self.dirty = self.raw_data.applymap(str.upper).copy()
+            self.dirty = self.applymap(str.upper).copy()
 
         # Replace specified characters with NaN
         self.dirty.replace(to_remove, np.nan, inplace=True)
@@ -205,19 +186,16 @@ class MSA(pd.DataFrame):
         # print(f"self.clean.shape after removing rows with NaN values above the threshold: {self.clean.shape}")
 
         # Reset the index, drop duplicates, and fill NaN values with '-'
-        self.data = self.clean.reset_index(drop=True) \
+        self.unique_sequences = self.clean.reset_index(drop=True) \
             .drop_duplicates() \
             .fillna('-') \
             .copy()
 
-        # Store a flag indicating whether plotting is enabled
-        self.plots['cleanse_data'] = plot
-
         # If plotting is enabled, plot heatmaps
         if plot:
-            self._plot_cleanse_heatmaps()
+            self._plot_cleanse_heatmaps(save=save, show=show)
 
-    def _plot_cleanse_heatmaps(self):
+    def _plot_cleanse_heatmaps(self, save=False, show=False):
         """
         Generate and display cleansing heatmaps plot on the specified axes.
         """
@@ -226,25 +204,29 @@ class MSA(pd.DataFrame):
 
         # Create the heatmap before cleansing on the first Axes
         ax1 = axes[0]  # First subplot
-        heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
+        heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
 
         # Create the heatmap after cleansing on the second Axes
         ax2 = axes[1]  # Second subplot
-        heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='binary', aspect='auto', extent=[0, 1, 0, 1])
+        heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
 
         # Create a shared color bar axis
         cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # Adjust the position and size as needed
 
         # Add color bars to the right of the heatmaps with the shared color bar axis
         cbar_before = plt.colorbar(heatmap_before, cax=cax)
-        cbar_before.set_label('Missing Values (NaN)')
+        cbar_before.set_label('Gaps (Indels)')
         cbar_after = plt.colorbar(heatmap_after, cax=cax)  # Use the same color bar axis
-        cbar_after.set_label('Missing Values (NaN)')
+        cbar_after.set_label('Gaps (Indels)')
 
         ax1.axis('off')  # Turn off axis labels for the first subplot
         ax2.axis('off')  # Turn off axis labels for the second subplot
 
-        plt.show()
+        if show:
+            plt.show()
+
+        if save:
+            plt.savefig("./output/cleanse_heatmaps.png", dpi=300)
 
     def reduce(self, plot=False, *args, **kwargs):
         """
@@ -260,23 +242,19 @@ class MSA(pd.DataFrame):
         - The row coordinates after reduction are stored in the 'coordinates' attribute.
 
         Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
+        msa = MSA('example.fasta')
         msa.map_positions()
-        msa.cleanse_data()
+        msa.cleanse()
         msa.reduce(plot=True)
         """
         # Perform MCA
-        mca = MCA(*args, **kwargs)
-        mca.fit(self.data)
-        self.analysis = mca
+        self.mca = MCA(*args, **kwargs)
+        self.mca.fit(self.unique_sequences)
 
-        # Get the row coordinates
-        self.coordinates = self.analysis.transform(self.data)
+        self.coordinates = np.array(self.mca.transform(self.unique_sequences))
 
-        self.plots['analyse'] = plot  # Set a flag to indicate plotting
         if plot:
-            self._plot_mca()
+            self._plot_mca()  # save=save, show=show)
 
     def _plot_mca(self):
         """
@@ -286,23 +264,22 @@ class MSA(pd.DataFrame):
         - This method plots a scatter plot of both sequences and residues overlaid based on the MCA results.
 
         Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
+        msa = MSA('example.fasta')
         msa.map_positions()
-        msa.cleanse_data()
+        msa.cleanse()
         msa.reduce(plot=True)
         """
         try:
             # Plot together the scatter plot of both sequences and residues overlaid
-            self.analysis.plot(
-                self.data,
+            self.mca.plot(
+                self.unique_sequences,
                 x_component=0,
                 y_component=1
             )
         finally:
             pass
 
-    def label_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False):
+    def cluster_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage'):
         """
         Cluster the MSA data and obtain cluster labels.
 
@@ -310,7 +287,6 @@ class MSA(pd.DataFrame):
             min_clusters (int, optional): Minimum number of clusters (default is 2).
             max_clusters (int, optional): Maximum number of clusters (default is 10).
             method (str, optional): Clustering method ('k-means' or 'single-linkage') (default is 'single-linkage').
-            plot (bool, optional): Whether to plot the clustering results (default is False).
 
         Notes:
         - This method performs clustering on the MSA data and assigns cluster labels to sequences.
@@ -319,16 +295,14 @@ class MSA(pd.DataFrame):
         - The cluster labels are stored in the 'labels' attribute of the MSA object.
 
         Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
+        msa = MSA('example.fasta')
         msa.map_positions()
-        msa.cleanse_data()
-        msa.label_sequences(method='single-linkage', min_clusters=3, plot=True)
+        msa.cleanse()
+        msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True)
         """
         if method not in ['k-means', 'single-linkage']:
             raise ValueError("method must be 'k-means' or 'single-linkage")
 
-        coordinates = np.array(self.coordinates)
         # Define a range of potential numbers of clusters to evaluate
         k_values = range(min_clusters, max_clusters)
         # Perform clustering for different numbers of clusters and compute silhouette scores
@@ -336,16 +310,16 @@ class MSA(pd.DataFrame):
         for k in range(min_clusters, max_clusters + 1):
             if method == 'k-means':
                 model = KMeans(n_clusters=k, n_init=max_clusters)  # Set n_init explicitly
-                model.fit(coordinates)
+                model.fit(self.coordinates)
                 labels = model.labels_
-                score = silhouette_score(coordinates, labels)
+                score = silhouette_score(self.coordinates, labels)
                 silhouette_scores.append(score)
             elif method == 'single-linkage':
                 # Run clustermap with potential performance improvement
-                model = fastcluster.linkage(coordinates, method='ward')
+                model = fastcluster.linkage(self.coordinates, method='ward')
                 # Calculate silhouette score for each value of k
                 labels = fcluster(model, k, criterion='maxclust')
-                silhouette_scores.append(silhouette_score(coordinates, labels))
+                silhouette_scores.append(silhouette_score(self.coordinates, labels))
 
         # Find the index of the maximum silhouette score
         best_index = np.argmax(silhouette_scores)
@@ -355,7 +329,7 @@ class MSA(pd.DataFrame):
             best_num_clusters = best_index + min_clusters
             # Perform clustering with the best number of clusters
             model = KMeans(n_clusters=best_num_clusters, n_init=max_clusters)
-            model.fit(coordinates)
+            model.fit(self.coordinates)
             self.labels = model.labels_
         elif method == 'single-linkage':
             # Get the best value of k
@@ -363,34 +337,7 @@ class MSA(pd.DataFrame):
             # Get the cluster labels for each sequence in the MSA
             self.labels = fcluster(model, best_k, criterion='maxclust')
 
-        self.plots['get_labels'] = plot  # Set a flag to indicate plotting
-        if plot:
-            self._plot_sequence_labels()
-
-    def _plot_sequence_labels(self):
-        """
-        Generate and display a cluster labels plot on the specified axes.
-
-        Notes:
-        - This method generates a scatter plot of sequences based on MCA coordinates, with points colored by cluster labels.
-        - It provides a visualization of the clustering results.
-
-        Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
-        msa.map_positions()
-        msa.cleanse_data()
-        msa.label_sequences(method='single-linkage', min_clusters=3, plot=True)
-        """
-        fig, ax = plt.subplots(figsize=(8, 6))  # Create a single subplot
-        coordinates = np.array(self.coordinates)
-        ax.scatter(coordinates[:, 0], coordinates[:, 1], c=self.labels, cmap='viridis', alpha=0.5)
-        ax.set_xlabel('Dimension 1')
-        ax.set_ylabel('Dimension 2')
-        # ax.set_title("Scatter Plot of Sequences Clusters out of MCA Coordinates")
-        plt.show()
-
-    def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False):
+    def generate_wordclouds(self, path_to_metadata=None, column='Protein names', plot=False, save=False, show=False):
         """
         Generate word cloud visualizations from protein names in a DataFrame.
 
@@ -398,16 +345,17 @@ class MSA(pd.DataFrame):
             path_to_metadata (str, default=None): Path to metadata file in tsv format.
             column (str, default='Protein names'): The name of the column in the DataFrame containing protein names.
             plot (bool, default=False): Whether to plot word clouds.
+            save (bool, default=False): Whether to save word clouds.
+            show (bool, default=False): Whether to show word clouds.
 
         This method extracts substrate and enzyme names from the specified column using regular expressions,
         normalizes the names, and creates word cloud plots for each cluster of sequences.
 
         Example:
-        msa = MSA()
-        msa.parse_msa_file('example.fasta')
+        msa = MSA('example.fasta')
         msa.map_positions()
-        msa.cleanse_data()
-        msa.label_sequences(method='single-linkage', min_clusters=3)
+        msa.cleanse()
+        msa.cluster_sequences(method='single-linkage', min_clusters=3)
         msa.generate_wordclouds(path_to_metadata='metadata.tsv', plot=True)
         """
         # Read the TSV file into a DataFrame
@@ -417,8 +365,8 @@ class MSA(pd.DataFrame):
 
             # Process data for each cluster
             for label in set(self.labels):
-                indices = self.data.iloc[self.labels == label].index
-                headers = self.raw_data.index[indices]
+                indices = self.unique_sequences.iloc[self.labels == label].index
+                headers = self.index[indices]
                 entry_names = [header.split('/')[0] for header in headers]
 
                 # Perform a left join using different key column names
@@ -447,11 +395,10 @@ class MSA(pd.DataFrame):
                 )
                 self.wordcloud_data[label] = wordcloud_text
 
-            self.plots['generate_wordcloud'] = plot  # Set a flag to indicate plotting
             if plot:
-                self._plot_wordclouds()
+                self._plot_wordclouds(save=save, show=show)
 
-    def _plot_wordclouds(self):
+    def _plot_wordclouds(self, save=False, show=False):
         """
         Plot word clouds generated by the generate_wordclouds method.
 
@@ -480,10 +427,13 @@ class MSA(pd.DataFrame):
             ax.axis('off')
             # ax.set_title(f'Wordcloud of Protein Names for Cluster {label}')
 
-        # Show the plot
-        plt.show()
+        if show:
+            plt.show()
 
-    def select_features(self, n_estimators=None, random_state=None, plot=False):
+        if save:
+            plt.savefig("./output/wordclould.png")
+
+    def select_features(self, n_estimators=None, random_state=None, plot=False, save=False, show=False):
         """
         Select important features (residues) from the MSA data.
 
@@ -491,9 +441,11 @@ class MSA(pd.DataFrame):
             n_estimators (int, optional): Parameter n_estimators for RandomForest.
             random_state: (int, optional): Parameter random_state for RandomForest.
             plot (bool, optional): Whether to plot feature selection results (default is False).
+            save (bool, optional): Whether to save feature selection results (default is False).
+            show (bool, optional): Whether to show feature selection results (default is False).
         """
         # Extract X (features) and y (labels)
-        x = self.data
+        x = self.unique_sequences
         y = pd.get_dummies(self.labels).astype(int) if len(set(self.labels)) > 2 else self.labels
 
         # Perform one-hot encoding on the categorical features
@@ -534,11 +486,10 @@ class MSA(pd.DataFrame):
         self.selected_features = selected_features
         self.sorted_importance = sorted_importance
 
-        self.plots['select_features'] = plot  # Set a flag to indicate plotting
         if plot:
-            self._plot_pareto()
+            self._plot_pareto(save=save, show=show)
 
-    def _plot_pareto(self):
+    def _plot_pareto(self, save=False, show=False):
         """
         Generate and display feature selection plot on the specified axes.
         """
@@ -557,7 +508,8 @@ class MSA(pd.DataFrame):
         ax2 = ax1.twinx()
 
         # Line chart of cumulative percentage importance
-        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color='magenta', marker='.')
+        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color='magenta',
+                 marker='.')
         ax2.set_ylabel('Cumulative Importance', fontsize=16)
         ax2.tick_params(axis='y', labelsize=12)
 
@@ -566,10 +518,13 @@ class MSA(pd.DataFrame):
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=90)
         plt.setp(ax2.xaxis.get_majorticklabels(), rotation=90)
 
-        # Show the plot
-        plt.show()
+        if show:
+            plt.show()
 
-    def select_residues(self, threshold=0.9, top_n=None, plot=False):
+        if save:
+            plt.savefig("./output/pareto_chart.png")
+
+    def select_residues(self, threshold=0.9, top_n=None, plot=False, save=False, show=False):
         """
         Select and store residues to be candidates for Specificity-determining Positions (SDPs) from the MSA data.
 
@@ -577,6 +532,8 @@ class MSA(pd.DataFrame):
             threshold (float, optional): The threshold for selecting residues based on importance (default is 0.9).
             top_n (int, optional): The top N residues to select based on importance (default is None).
             plot (bool, optional): Whether to plot the selected residues (default is False).
+            save (bool, optional): Whether to save the selected residues (default is False).
+            show (bool, optional): Whether to show the selected residues (default is False).
         """
         # Calculate cumulative sum of importance
         cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
@@ -588,79 +545,101 @@ class MSA(pd.DataFrame):
         self.selected_columns = selected_columns if top_n is None else selected_columns[:top_n]
         # Create an empty DataFrame with columns
         self.profiles = pd.DataFrame(columns=sorted(self.selected_columns))
-        # Iterate through rows of msa.data
-        for index, row in self.data[self.selected_columns].iterrows():
-            header = self.raw_data.index[index]
+        # Iterate through rows of msa
+        for header, row in self[sorted(self.selected_columns)].iterrows():
+            pos_map = self.positions_map.get(header, {})
             series = pd.Series(
-                {col: f"{seq3(aa)}{self.positions_map[header].get(col, '?')}" for col, aa in row.items()}
-            ).sort_index()
+                {col: f"{seq3(aa)}{pos_map.get(col, '?')}" for col, aa in row.items()}
+            )
             self.profiles = pd.concat([self.profiles, series.to_frame().T], axis=0)
-        # Set the custom index to the resulting DataFrame
-        self.profiles.index = self.raw_data.index[self.data.index]
+        self.profiles.index = self.index
 
-        self.plots['get_sdps'] = plot  # Set a flag to indicate plotting
         if plot:
-            self._plot_selected_residues()
+            self._plot_perceptual_map(save=save, show=show)
 
-    def _plot_selected_residues(self):
+    def _plot_perceptual_map(self, save=False, show=False):
         """
         Generate and display selected residues plot on the specified axes.
         """
         selected_residues = [
             feature for feature in self.selected_features if int(feature.split('_')[0]) in self.selected_columns
         ]
-        df_res = self.analysis.column_coordinates(self.data[self.selected_columns]).loc[selected_residues]
+        df_res = self.mca.column_coordinates(self.unique_sequences[self.selected_columns]).loc[selected_residues]
         residues = []
         for res_idx in df_res.index:
             msa_column, amino_acid = res_idx.split('_')
             three_letter_aa = seq3(amino_acid)
             residues.append(three_letter_aa + msa_column)
         df_res = df_res.set_index(pd.Index(residues))
+
         # Create figure
         plt.figure(figsize=(8, 6))
-        # Scatter plot of sequences colored by cluster labels
-        seq_coord = np.array(self.coordinates)
-        plt.scatter(
-            seq_coord[:, 0],
-            seq_coord[:, 1],
-            c=self.labels,
-            cmap='viridis',
-            alpha=0.5,
-            label='Clustered Sequences'
-        )
+
+        # Create legends for cluster labels
+        unique_labels = set(self.labels)
+        legend_handles = []
+        # Iterate through unique labels
+        for label in unique_labels:
+            # Find indices where the labels array matches the current label
+            indices = np.where(self.labels == label)[0]
+            plt.scatter(
+                self.coordinates[indices, 0],
+                self.coordinates[indices, 1],
+                color=plt.cm.viridis(label / len(unique_labels)),
+                alpha=0.5
+            )
+            legend_handles.append(
+                plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {label}', markersize=10,
+                           markerfacecolor=plt.cm.viridis(label / len(unique_labels)))
+            )
+
         # Scatter plot of labeled residues
-        plt.scatter(df_res[0], df_res[1], marker='x', color='black', s=50, label='Selected Residues')
+        plt.scatter(df_res[0], df_res[1], marker='*', color='black', s=50)
+
+        # Annotate labeled residues
         for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
             plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
+
+        legend_handles.append(
+            plt.Line2D([0], [0], marker='*', color='k', label='Selected Residues', markersize=10)
+        )
+
         # Set labels and title
         plt.xlabel('Dimension 1')
         plt.ylabel('Dimension 2')
-        # plt.title('Conceptual Map of Clustered Sequences and Selected Residues')
-        # Show the plot
-        plt.legend()
+
+        plt.legend(handles=legend_handles, title='Sequence Clusters')
+
         plt.grid()
 
-    def generate_logos(self, plot=False):
+        if show:
+            plt.show()
+
+        if save:
+            plt.savefig("./output/perceptual_map.png")
+
+    def generate_logos(self, plot=False, save=False, show=False):
         """
         Generate logos from the MSA data for each cluster label.
 
         Parameters:
             plot (bool, optional): Whether to plot the generated logos (default is False).
+            save (bool, optional): Whether to save the generated logos (default is False).
+            show (bool, optional): Whether to show the generated logos (default is False).
         """
         if plot:
-            self.plots['generate_logos'] = plot  # Set a flag to indicate plotting
             self.logos_data = {}  # Initialize logos_data as an empty dictionary
             for label in set(self.labels):
-                sub_msa = self.data[sorted(self.selected_columns)].iloc[self.labels == label]
+                sub_msa = self.unique_sequences[sorted(self.selected_columns)].iloc[self.labels == label]
 
                 # Calculate sequence frequencies for each position
                 data = sub_msa.T.apply(lambda col: col.value_counts(normalize=True), axis=1).fillna(0)
 
                 # Store the seq_logo in logos_data with the label as the key
                 self.logos_data[label] = data
-            self._plot_logos()
+            self._plot_logos(save=save, show=show)
 
-    def _plot_logos(self, color_scheme='NajafabadiEtAl2017'):
+    def _plot_logos(self, color_scheme='NajafabadiEtAl2017', save=False, show=False):
         """
         Plot logos generated by the generate_logos method.
 
@@ -678,8 +657,6 @@ class MSA(pd.DataFrame):
             color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values)
         if color_scheme not in color_schemes_list:
             raise ValueError(f"color scheme must be in {color_schemes_list}")
-        # Create a figure and subplots for logos
-        num_clusters = len(self.logos_data)
 
         for i, (label, data) in enumerate(self.logos_data.items()):
             msa_columns = data.index.tolist()
@@ -702,64 +679,60 @@ class MSA(pd.DataFrame):
             ax.set_xticks(range(len(msa_columns)))
             ax.set_xticklabels(msa_columns, fontsize=24)
 
-        # Show the plot
-        plt.show()
+        if show:
+            plt.show()
+
+        if save:
+            plt.savefig("./output/sdp_logos.png")
 
 
-def main(args):
+def main():
     """
     Main function to process the Multiple Sequence Alignment (MSA) data.
-
-    Args:
-        args: Command-line arguments parsed by argparse.
 
     This function performs a series of data processing and analysis steps on the MSA data,
     including parsing, cleansing, dimension reduction, clustering, word cloud generation,
     feature selection, selecting residues, and generating logos.
     """
-    # Create data frame from raw data and clean it
-    msa_file = args.msa_file
-    msa = MSA()
-    msa.parse_msa_file(msa_file)
-    msa.map_positions()
-    msa.cleanse_data(plot=args.plot_cleanse)
-    msa.reduce(plot=args.plot_reduce)
-    msa.label_sequences(method='single-linkage', min_clusters=3, plot=args.plot_label)
-    msa.generate_wordclouds(path_to_metadata='pf00848-metadata.tsv', plot=args.plot_wordclouds)
-    msa.select_features(n_estimators=1000, random_state=42, plot=args.plot_select_features)
-    msa.select_residues(top_n=3, plot=args.plot_select_residues)
-    msa.generate_logos(plot=args.plot_logos)
-
-
-def parse_args():
-    """
-    Parse command-line arguments using argparse.
-
-    Returns:
-        Namespace: An object containing parsed command-line arguments.
-    """
+    # Define command-line arguments
     parser = argparse.ArgumentParser(description="Process Multiple Sequence Alignment (MSA) data.")
-    parser.add_argument("msa_file", type=str, help="Path to the MSA file")
-    parser.add_argument("metadata_file", type=str, help="Path to the metadata file in tsv format.")
-    parser.add_argument("--plot-cleanse", action="store_true", help="Plot cleanse data")
-    parser.add_argument("--plot-reduce", action="store_true", help="Plot data reduction")
-    parser.add_argument("--plot-label", action="store_true", help="Plot sequence labels")
-    parser.add_argument("--plot-wordclouds", action="store_true", help="Plot word clouds")
-    parser.add_argument("--plot-select-features", action="store_true", help="Plot feature selection")
-    parser.add_argument("--plot-select-residues", action="store_true", help="Plot selected residues")
-    parser.add_argument("--plot-logos", action="store_true", help="Plot logos")
+    parser.add_argument("msa-file", type=str, help="Path to the MSA file")
+    parser.add_argument("--metadata-file", type=str, help="Path to the metadata file in tsv format.")
+    parser.add_argument("--plot", action="store_true", help="Whether to plot data")
+    parser.add_argument("--save", action="store_true", help="Whether to save plots")
+    parser.add_argument("--show", action="store_true", help="Whether to show plots")
 
     # Create a custom usage message
     usage = "python your_script.py MSA_FILE [OPTIONS]"
     parser.usage = usage
 
-    return parser.parse_args()
+    arguments = parser.parse_args()
+
+    # Create data frame from raw data and clean it
+    msa_file = arguments.msa_file
+    msa = MSA()
+    msa.parse_msa_file(msa_file)
+    msa.map_positions()
+    common_arguments = {
+        'plot': arguments.plot,
+        'save': arguments.save,
+        'show': arguments.show
+    }
+    msa.cleanse(**common_arguments)
+    msa.reduce(plot=arguments.plot)
+    msa.cluster_sequences(method='single-linkage', min_clusters=3)
+    if arguments.metadata_file:
+        msa.generate_wordclouds(path_to_metadata=arguments.metadata_file, **common_arguments)
+    msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
+    msa.select_residues(top_n=3, **common_arguments)
+    msa.generate_logos(**common_arguments)
+
+    return True
 
 
 if __name__ == "__main__":
     try:
-        args = parse_args()
-        main(args)
+        sys.exit(0 if main() else 1)
     except Exception as e:
         print(f"An error occurred: {type(e).__name__} - {e}")
-        sys.exit(1)
+        sys.exit(2)

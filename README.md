@@ -3,17 +3,15 @@
 * [protlearn](#protlearn)
   * [MSA](#protlearn.MSA)
     * [\_\_init\_\_](#protlearn.MSA.__init__)
-    * [parse\_msa\_file](#protlearn.MSA.parse_msa_file)
     * [map\_positions](#protlearn.MSA.map_positions)
-    * [cleanse\_data](#protlearn.MSA.cleanse_data)
+    * [cleanse](#protlearn.MSA.cleanse)
     * [reduce](#protlearn.MSA.reduce)
-    * [label\_sequences](#protlearn.MSA.label_sequences)
+    * [label\_sequences](#protlearn.MSA.cluster_sequences)
     * [generate\_wordclouds](#protlearn.MSA.generate_wordclouds)
     * [select\_features](#protlearn.MSA.select_features)
     * [select\_residues](#protlearn.MSA.select_residues)
     * [generate\_logos](#protlearn.MSA.generate_logos)
   * [main](#protlearn.main)
-  * [parse\_args](#protlearn.parse_args)
 
 <a id="protlearn"></a>
 
@@ -52,7 +50,7 @@ A class for processing and analyzing Multiple Sequence Alignments (MSA).
 #### \_\_init\_\_
 
 ```python
-def __init__(*args, **kwargs)
+def __init__(msa_file, msa_format="fasta", *args, **kwargs)
 ```
 
 Initialize the MSA object.
@@ -61,23 +59,6 @@ Initialize the MSA object.
 
 - `*args` - Variable-length positional arguments.
 - `**kwargs` - Variable-length keyword arguments.
-
-<a id="protlearn.MSA.parse_msa_file"></a>
-
-#### parse\_msa\_file
-
-```python
-def parse_msa_file(msa_file, msa_format="fasta", *args, **kwargs)
-```
-
-Parse an MSA file and store the raw data in the MSA object.
-
-**Arguments**:
-
-- `msa_file` _str_ - The path to the MSA file.
-- `msa_format` _str, optional_ - The format of the MSA file (default is "fasta").
-- `*args` - Additional positional arguments to pass to SeqIO.parse.
-- `**kwargs` - Additional keyword arguments to pass to SeqIO.parse.
 
 <a id="protlearn.MSA.map_positions"></a>
 
@@ -100,8 +81,8 @@ positions (values).
 
 For example:
 {
-  'Seq1/1-100': {1: 1, 2: 2, ...},
-  'Seq2/101-200': {101: 1, 102: 2, ...},
+'Seq1/1-100': {21: 1, 25: 2, ...},
+'Seq2/171-432': {101: 171, 103: 172, ...},
 ...
 }
 
@@ -115,29 +96,35 @@ of residues in the MSA.
 
 **Example**:
 
-  msa = MSA()
-  msa.parse_msa_file('example.fasta')
+  msa = MSA('example.fasta')
   msa.map_positions()
   
   Access the mapping:
   positions = msa.positions_map
 
-<a id="protlearn.MSA.cleanse_data"></a>
+<a id="protlearn.MSA.cleanse"></a>
 
-#### cleanse\_data
+#### cleanse
 
 ```python
-def cleanse_data(indel='-', remove_lowercase=True, threshold=.9, plot=False)
+def cleanse(indel='-',
+            remove_lowercase=True,
+            threshold=.9,
+            plot=False,
+            save=False,
+            show=False)
 ```
 
-Cleanse the MSA data by removing columns and rows with missing values.
+Cleanse the MSA data by removing columns and rows with gaps/indels.
 
 **Arguments**:
 
 - `indel` _str, optional_ - The character representing gaps/indels (default is '-').
 - `remove_lowercase` _bool, optional_ - Whether to remove lowercase characters (default is True).
-- `threshold` _float, optional_ - The threshold for missing values (default is 0.9).
-- `plot` _bool, optional_ - Whether to plot a heatmap of missing values (default is False).
+- `threshold` _float, optional_ - The threshold for gaps/indels (default is 0.9).
+- `plot` _bool, optional_ - Whether to plot a heatmap of gaps/indels (default is False).
+- `save` _bool, optional_ - Whether to save a heatmap of gaps/indels (default is False).
+- `show` _bool, optional_ - Whether to show a heatmap of gaps/indels (default is False).
 
 <a id="protlearn.MSA.reduce"></a>
 
@@ -164,21 +151,19 @@ Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce
 
 **Example**:
 
-  msa = MSA()
-  msa.parse_msa_file('example.fasta')
+  msa = MSA('example.fasta')
   msa.map_positions()
-  msa.cleanse_data()
+  msa.cleanse()
   msa.reduce(plot=True)
 
-<a id="protlearn.MSA.label_sequences"></a>
+<a id="protlearn.MSA.cluster_sequences"></a>
 
-#### label\_sequences
+#### cluster\_sequences
 
 ```python
-def label_sequences(min_clusters=2,
-                    max_clusters=10,
-                    method='single-linkage',
-                    plot=False)
+def cluster_sequences(min_clusters=2,
+                      max_clusters=10,
+                      method='single-linkage')
 ```
 
 Cluster the MSA data and obtain cluster labels.
@@ -188,7 +173,6 @@ Cluster the MSA data and obtain cluster labels.
 - `min_clusters` _int, optional_ - Minimum number of clusters (default is 2).
 - `max_clusters` _int, optional_ - Maximum number of clusters (default is 10).
 - `method` _str, optional_ - Clustering method ('k-means' or 'single-linkage') (default is 'single-linkage').
-- `plot` _bool, optional_ - Whether to plot the clustering results (default is False).
   
 
 **Notes**:
@@ -201,11 +185,10 @@ Cluster the MSA data and obtain cluster labels.
 
 **Example**:
 
-  msa = MSA()
-  msa.parse_msa_file('example.fasta')
+  msa = MSA('example.fasta')
   msa.map_positions()
-  msa.cleanse_data()
-  msa.label_sequences(method='single-linkage', min_clusters=3, plot=True)
+  msa.cleanse()
+  msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True)
 
 <a id="protlearn.MSA.generate_wordclouds"></a>
 
@@ -214,7 +197,9 @@ Cluster the MSA data and obtain cluster labels.
 ```python
 def generate_wordclouds(path_to_metadata=None,
                         column='Protein names',
-                        plot=False)
+                        plot=False,
+                        save=False,
+                        show=False)
 ```
 
 Generate word cloud visualizations from protein names in a DataFrame.
@@ -224,6 +209,8 @@ Generate word cloud visualizations from protein names in a DataFrame.
 - `path_to_metadata` _str, default=None_ - Path to metadata file in tsv format.
 - `column` _str, default='Protein names'_ - The name of the column in the DataFrame containing protein names.
 - `plot` _bool, default=False_ - Whether to plot word clouds.
+- `save` _bool, default=False_ - Whether to save word clouds.
+- `show` _bool, default=False_ - Whether to show word clouds.
   
   This method extracts substrate and enzyme names from the specified column using regular expressions,
   normalizes the names, and creates word cloud plots for each cluster of sequences.
@@ -231,11 +218,10 @@ Generate word cloud visualizations from protein names in a DataFrame.
 
 **Example**:
 
-  msa = MSA()
-  msa.parse_msa_file('example.fasta')
+  msa = MSA('example.fasta')
   msa.map_positions()
-  msa.cleanse_data()
-  msa.label_sequences(method='single-linkage', min_clusters=3)
+  msa.cleanse()
+  msa.cluster_sequences(method='single-linkage', min_clusters=3)
   msa.generate_wordclouds(path_to_metadata='metadata.tsv', plot=True)
 
 <a id="protlearn.MSA.select_features"></a>
@@ -243,7 +229,11 @@ Generate word cloud visualizations from protein names in a DataFrame.
 #### select\_features
 
 ```python
-def select_features(n_estimators=None, random_state=None, plot=False)
+def select_features(n_estimators=None,
+                    random_state=None,
+                    plot=False,
+                    save=False,
+                    show=False)
 ```
 
 Select important features (residues) from the MSA data.
@@ -253,13 +243,19 @@ Select important features (residues) from the MSA data.
 - `n_estimators` _int, optional_ - Parameter n_estimators for RandomForest.
 - `random_state` - (int, optional): Parameter random_state for RandomForest.
 - `plot` _bool, optional_ - Whether to plot feature selection results (default is False).
+- `save` _bool, optional_ - Whether to save feature selection results (default is False).
+- `show` _bool, optional_ - Whether to show feature selection results (default is False).
 
 <a id="protlearn.MSA.select_residues"></a>
 
 #### select\_residues
 
 ```python
-def select_residues(threshold=0.9, top_n=None, plot=False)
+def select_residues(threshold=0.9,
+                    top_n=None,
+                    plot=False,
+                    save=False,
+                    show=False)
 ```
 
 Select and store residues to be candidates for Specificity-determining Positions (SDPs) from the MSA data.
@@ -269,13 +265,15 @@ Select and store residues to be candidates for Specificity-determining Positions
 - `threshold` _float, optional_ - The threshold for selecting residues based on importance (default is 0.9).
 - `top_n` _int, optional_ - The top N residues to select based on importance (default is None).
 - `plot` _bool, optional_ - Whether to plot the selected residues (default is False).
+- `save` _bool, optional_ - Whether to save the selected residues (default is False).
+- `show` _bool, optional_ - Whether to show the selected residues (default is False).
 
 <a id="protlearn.MSA.generate_logos"></a>
 
 #### generate\_logos
 
 ```python
-def generate_logos(plot=False)
+def generate_logos(plot=False, save=False, show=False)
 ```
 
 Generate logos from the MSA data for each cluster label.
@@ -283,36 +281,20 @@ Generate logos from the MSA data for each cluster label.
 **Arguments**:
 
 - `plot` _bool, optional_ - Whether to plot the generated logos (default is False).
+- `save` _bool, optional_ - Whether to save the generated logos (default is False).
+- `show` _bool, optional_ - Whether to show the generated logos (default is False).
 
 <a id="protlearn.main"></a>
 
 #### main
 
 ```python
-def main(args)
+def main()
 ```
 
 Main function to process the Multiple Sequence Alignment (MSA) data.
 
-**Arguments**:
-
-- `args` - Command-line arguments parsed by argparse.
-  
-  This function performs a series of data processing and analysis steps on the MSA data,
-  including parsing, cleansing, dimension reduction, clustering, word cloud generation,
-  feature selection, selecting residues, and generating logos.
-
-<a id="protlearn.parse_args"></a>
-
-#### parse\_args
-
-```python
-def parse_args()
-```
-
-Parse command-line arguments using argparse.
-
-**Returns**:
-
-- `Namespace` - An object containing parsed command-line arguments.
+This function performs a series of data processing and analysis steps on the MSA data,
+including parsing, cleansing, dimension reduction, clustering, word cloud generation,
+feature selection, selecting residues, and generating logos.
 
