@@ -696,8 +696,8 @@ def main():
     """
     # Define command-line arguments
     parser = argparse.ArgumentParser(description="Process Multiple Sequence Alignment (MSA) data.")
-    parser.add_argument("msa-file", type=str, help="Path to the MSA file")
-    parser.add_argument("--metadata-file", type=str, help="Path to the metadata file in tsv format.")
+    parser.add_argument("data", type=str, help="Path to the MSA file")
+    parser.add_argument("--metadata", type=str, help="Path to the metadata file in tsv format.")
     parser.add_argument("--plot", action="store_true", help="Whether to plot data")
     parser.add_argument("--save", action="store_true", help="Whether to save plots")
     parser.add_argument("--show", action="store_true", help="Whether to show plots")
@@ -709,7 +709,7 @@ def main():
     arguments = parser.parse_args()
 
     # Create data frame from raw data and clean it
-    msa = MSA(arguments.msa_file)
+    msa = MSA(arguments.data)
     msa.map_positions()
     common_arguments = {
         'plot': arguments.plot,
@@ -719,8 +719,8 @@ def main():
     msa.cleanse(**common_arguments)
     msa.reduce(plot=arguments.plot)
     msa.cluster_sequences(method='single-linkage', min_clusters=3)
-    if arguments.metadata_file:
-        msa.generate_wordclouds(path_to_metadata=arguments.metadata_file, **common_arguments)
+    if arguments.metadata:
+        msa.generate_wordclouds(path_to_metadata=arguments.metadata, **common_arguments)
     msa.select_features(n_estimators=1000, random_state=42, **common_arguments)
     msa.select_residues(top_n=3, **common_arguments)
     msa.generate_logos(**common_arguments)
