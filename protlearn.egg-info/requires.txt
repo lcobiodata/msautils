@@ -8,3 +8,10 @@ pyclustering
 scikit-learn
 pandas
 seaborn
+nltk
+fastcluster
+wordcloud
+prince
+logomaker
+nglview
+IPython
