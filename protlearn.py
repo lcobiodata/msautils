@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from wordcloud import WordCloud
 import nltk
+import warnings
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectFromModel
@@ -39,6 +40,7 @@ import fastcluster
 from scipy.cluster.hierarchy import fcluster
 from collections import defaultdict
 import logomaker as lm
+import os
 import sys
 import argparse
 import pickle
@@ -53,8 +55,7 @@ class MSA(pd.DataFrame):
     """
     A class for processing and analyzing Multiple Sequence Alignments (MSA).
     """
-
-    def __init__(self, msa_file, msa_format="fasta", *args, **kwargs):
+    def __init__(self, msa_file=None, msa_format="fasta", metadata=None, *args, **kwargs):
         """
         Initialize the MSA object.
 
@@ -64,33 +65,36 @@ class MSA(pd.DataFrame):
         """
         headers = []
         sequences = []
+        if msa_file:
+            try:
+                # Parse the MSA file and extract headers and sequences
+                for record in SeqIO.parse(msa_file, msa_format, *args, **kwargs):
+                    headers.append(record.id)
+                    sequences.append(record.seq)
 
-        try:
-            # Parse the MSA file and extract headers and sequences
-            for record in SeqIO.parse(msa_file, msa_format, *args, **kwargs):
-                headers.append(record.id)
-                sequences.append(record.seq)
+            except FileNotFoundError:
+                raise ValueError(f"The file '{msa_file}' was not found.")
 
-        except FileNotFoundError:
-            raise ValueError(f"The file '{msa_file}' was not found.")
+            except ValueError as ve:
+                # This exception might be raised if the provided format is incorrect
+                raise ValueError(f"Error parsing the file '{msa_file}' with format '{msa_format}'. Details: {ve}")
 
-        except ValueError as ve:
-            # This exception might be raised if the provided format is incorrect
-            raise ValueError(f"Error parsing the file '{msa_file}' with format '{msa_format}'. Details: {ve}")
+            except Exception as e:
+                # General error handler for unexpected exceptions
+                raise RuntimeError(f"An unexpected error occurred while parsing the file '{msa_file}'. Details: {e}")
 
-        except Exception as e:
-            # General error handler for unexpected exceptions
-            raise RuntimeError(f"An unexpected error occurred while parsing the file '{msa_file}'. Details: {e}")
-
-        # Initialize the DataFrame part of the MSA class
-        super().__init__(data=np.array(sequences), index=headers)
+            data, index = np.array(sequences), headers
+            # Initialize the DataFrame part of the MSA class
+            super().__init__(data=data, index=index, *args, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
+        self.metadata = metadata
         self.positions_map = None  # Mapping of positions in the MSA
         self.dirty = None  # Dirty data (before cleansing)
         self.clean = None  # Clean data (after cleansing)
-        self.unique_sequences = None  # Processed MSA data
+        self.unique = None  # Processed MSA data
         self.mca = None  # Analysis results
         self.coordinates = None  # Reduced data coordinates
-        self.metadata = None
         self.labels = None  # Sequence labels or clusters
         self.encoded = None # One-hot encoded data set
         self.sorted_importance = None  # Sorted feature importances
@@ -207,7 +211,7 @@ class MSA(pd.DataFrame):
         print(f"self.clean.shape after removing rows with NaN values above the threshold: {self.clean.shape}")
 
         # Reset the index, drop duplicates, and fill NaN values with '-'
-        self.unique_sequences = self.clean.reset_index(drop=True) \
+        self.unique = self.clean.reset_index(drop=True) \
             .drop_duplicates() \
             .fillna('-') \
             .copy()
@@ -270,19 +274,19 @@ class MSA(pd.DataFrame):
         msa.cleanse()
         msa.reduce(plot=True, save=True) # This will plot the results and save the plot.
         """
-        # Check if unique_sequences exists and is not None
-        if not hasattr(self, "unique_sequences") or self.unique_sequences is None:
+        # Check if unique exists and is not None
+        if not hasattr(self, "unique") or self.unique is None:
             # Option 1: Automatically call cleanse
             self.cleanse()
             
             # Option 2: Raise an exception (uncomment the below line and comment out Option 1 if you want this)
-            # raise ValueError("self.unique_sequences is not set. Make sure to run self.cleanse() before calling self.reduce()")
+            # raise ValueError("self.unique is not set. Make sure to run self.cleanse() before calling self.reduce()")
 
         # Perform MCA
         self.mca = MCA(*args, **kwargs)
-        self.mca.fit(self.unique_sequences)
+        self.mca.fit(self.unique)
 
-        self.coordinates = np.array(self.mca.transform(self.unique_sequences))
+        self.coordinates = np.array(self.mca.transform(self.unique))
 
         if plot:
             self._plot_mca(save=save, show=show)
@@ -311,73 +315,47 @@ class MSA(pd.DataFrame):
         msa.reduce()
         msa._plot_mca(save=True, show=False) # This will only save the plot and not display it.
         """
-        # ROW_LIMIT = 5000
+        ROW_LIMIT = 5000
 
-        # # Define the dummy function do_not_show
-        # def do_not_show(*args, **kwargs):
-        #     pass
+        # Define the dummy function do_not_show
+        def do_not_show(*args, **kwargs):
+            pass
         
-        # # Check if rows exceed the limit
-        # if len(self.unique_sequences) > ROW_LIMIT:
-            
-        #     # If self.labels doesn't exist or is None
-        #     if not hasattr(self, 'labels') or self.labels is None:
-        #         self.cluster_sequences()  # Call cluster_sequences
+        # Check if rows exceed the limit
+        if len(self.unique) > ROW_LIMIT:
+            params = {'plot': False, 'save': False, 'show': False}
+            sample = self.unique.sample(n=5000, random_state=42)
+            obj = MSA(data=sample, index=sample.index)
+            obj.cleanse(**params)
+            obj.reduce(**params)
+        else:
+            obj = self
+        
+        # If we don't want to show the plot, redirect plt.show()
+        if not show:
+            original_show = plt.show
+            plt.show = do_not_show
 
-        #     # Proportional sampling based on cluster sizes
-        #     unique, counts = np.unique(self.labels, return_counts=True)
-        #     print(unique, counts)
-        #     proportions = counts / len(self.labels)
-        #     sample_sizes = (proportions * ROW_LIMIT).astype(int)
-            
-        #     # Adjust the last cluster to make sure we get exactly ROW_LIMIT rows
-        #     sample_sizes[-1] += ROW_LIMIT - np.sum(sample_sizes)
-            
-        #     sampled_indices = []
-        #     for cluster, sample_size in zip(unique, sample_sizes):
-        #         cluster_indices = np.where(self.labels == cluster)[0]
-        #         sampled_indices.extend(np.random.choice(cluster_indices, sample_size, replace=False))
-        #     print(sampled_indices)
-
-        #     sampled_data = self.unique_sequences.iloc[sampled_indices]
-            
-        # else:
-        #     sampled_data = self.unique_sequences
-
-        # # If we don't want to show the plot, redirect plt.show()
-        # if not show:
-        #     original_show = plt.show
-        #     plt.show = do_not_show
-
-        # # Plot the sampled data
-        # try:
-        #     self.mca.plot(
-        #         sampled_data,
-        #         x_component=0,
-        #         y_component=1
-        #     )
-        # finally:
-        #     pass
-
-        # Plot the sampled data
+        # Plot the data
         try:
-            self.mca.plot(
-                self.unique_sequences,
+            obj.mca.plot(
+                obj.unique,
                 x_component=0,
                 y_component=1
             )
+            # If you want to save the plot
+            if save:
+                plt.savefig("./output/mca_plot.png", dpi=300)
+        except Exception as e:
+            warnings.warn(f"Unable to plot mca results: {e}", UserWarning)
         finally:
             pass
 
-        # If you want to save the plot
-        if save:
-            plt.savefig("./output/mca_plot.png", dpi=300)
-        
         # If we saved the show, revert plt.show() back to its original state
         if not show:
             plt.show = original_show
 
-    def cluster_sequences(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False, save=False, show=False, **kwargs):
+    def cluster(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False, save=False, show=False, **kwargs):
         """
         Cluster the MSA data and obtain cluster labels.
 
@@ -400,7 +378,7 @@ class MSA(pd.DataFrame):
         msa = MSA('example.fasta')
         msa.map_positions()
         msa.cleanse()
-        msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True, save=True)
+        msa.cluster(method='single-linkage', min_clusters=3, plot=True, save=True)
         """
         # Check attribute dependencies and run the dependent method if needed
         if not hasattr(self, 'coordinates') or  self.coordinates is None:
@@ -462,62 +440,68 @@ class MSA(pd.DataFrame):
         # If metadata is None, default to self.metadata
         metadata = metadata or self.metadata
 
-        if metadata is None:
-            raise ValueError("metadata is not provided and self.metadata is not set. Please provide the 'metadata' argument or set self.metadata.")
+        if metadata is not None:
+            
+            # Read the TSV file into a DataFrame
+            try:
+                metadata = pd.read_csv(metadata, delimiter='\t')
+            except FileNotFoundError:
+                raise
 
-        # Read the TSV file into a DataFrame
-        metadata = pd.read_csv(metadata, delimiter='\t')
-        self.wordcloud_data = {}
+            self.wordcloud_data = {}
 
-        # Process data for each cluster
-        for label in np.unique(self.labels):
-            indices = self.unique_sequences.iloc[self.labels == label].index
-            headers = self.index[indices]
-            entry_names = [header.split('/')[0] for header in headers]
+            # Process data for each cluster
+            for label in np.unique(self.labels):
+                indices = self.unique.iloc[self.labels == label].index
+                headers = self.index[indices]
+                entry_names = [header.split('/')[0] for header in headers]
 
-            result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
+                result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
 
-            matches = result[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
+                matches = result[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
 
-            result['Substrate'] = matches[0] \
-                .fillna('') \
-                .apply(lambda x: '/'.join(re.findall(r'\b(\w+(?:ene|ine|ate|yl))\b', x, flags=re.IGNORECASE))) \
-                .apply(lambda x: x.lower())
-            result['Enzyme'] = matches[1] \
-                .fillna('') \
-                .apply(lambda x: x.split('-')[-1] if '-' in x else x) \
-                .apply(lambda x: x.lower())
-            result['Label'] = result['Substrate'].str.cat(result['Enzyme'], sep=' ').str.strip()
-            result = result.copy()
+                result['Substrate'] = matches[0] \
+                    .fillna('') \
+                    .apply(lambda x: '/'.join(re.findall(r'\b(\w+(?:ene|ine|ate|yl))\b', x, flags=re.IGNORECASE))) \
+                    .apply(lambda x: x.lower())
+                result['Enzyme'] = matches[1] \
+                    .fillna('') \
+                    .apply(lambda x: x.split('-')[-1] if '-' in x else x) \
+                    .apply(lambda x: x.lower())
+                result['Label'] = result['Substrate'].str.cat(result['Enzyme'], sep=' ').str.strip()
+                result = result.copy()
 
-            wordcloud_text = ' '.join(
-                sorted(
-                    set([string for string in result.Label.values.tolist() if len(string) > 0])
+                wordcloud_text = ' '.join(
+                    sorted(
+                        set([string for string in result.Label.values.tolist() if len(string) > 0])
+                    )
                 )
-            )
-            self.wordcloud_data[label] = wordcloud_text
+                self.wordcloud_data[label] = wordcloud_text
 
-        # Plotting logic
-        num_clusters = len(self.wordcloud_data)
-        fig, axs = plt.subplots(num_clusters, 1, figsize=(10, 6 * num_clusters))
+            # Plotting logic
+            num_clusters = len(self.wordcloud_data)
+            fig, axs = plt.subplots(num_clusters, 1, figsize=(10, 6 * num_clusters))
 
-        for i, (label, wordcloud_text) in enumerate(self.wordcloud_data.items()):
-            ax = axs[i] if num_clusters > 1 else axs
+            for i, (label, wordcloud_text) in enumerate(self.wordcloud_data.items()):
+                ax = axs[i] if num_clusters > 1 else axs
 
-            wordcloud = WordCloud(
-                width=800,
-                height=400,
-                background_color='white'
-            ).generate(wordcloud_text)
+                wordcloud = WordCloud(
+                    width=800,
+                    height=400,
+                    background_color='white'
+                ).generate(wordcloud_text)
 
-            ax.imshow(wordcloud, interpolation='bilinear')
-            ax.axis('off')
+                ax.imshow(wordcloud, interpolation='bilinear')
+                ax.axis('off')
 
-        if show:
-            plt.show()
+            if show:
+                plt.show()
 
-        if save:
-            plt.savefig("./output/wordclould.png")
+            if save:
+                plt.savefig("./output/wordclould.png")
+
+        else:
+            warnings.warn("metadata is not provided and self.metadata is not set. Please provide the 'metadata' argument or set self.metadata.", UserWarning)
 
     def select_features(self, n_estimators=None, random_state=None, plot=False, save=False, show=False):
         """
@@ -532,10 +516,10 @@ class MSA(pd.DataFrame):
         """
         # Check attribute dependencies and run the dependent method if needed
         if not hasattr(self, 'labels') or self.labels is None:
-            self.cluster_sequences()  # Assuming this is the method that populates self.labels
+            self.cluster()  # Assuming this is the method that populates self.labels
 
         # Extract X (features) and y (labels)
-        x = self.unique_sequences
+        x = self.unique
         y = pd.get_dummies(self.labels).astype(int) if len(np.unique(self.labels)) > 2 else self.labels
 
         # Perform one-hot encoding on the categorical features
@@ -703,7 +687,7 @@ class MSA(pd.DataFrame):
         selected_residues = [
             feature for feature in self.selected_features if int(feature.split('_')[0]) in self.selected_columns
         ]
-        df_res = self.mca.column_coordinates(self.unique_sequences[self.selected_columns]).loc[selected_residues]
+        df_res = self.mca.column_coordinates(self.unique[self.selected_columns]).loc[selected_residues]
         residues = []
         for res_idx in df_res.index:
             msa_column, amino_acid = res_idx.split('_')
@@ -776,7 +760,7 @@ class MSA(pd.DataFrame):
         self.logos_data = {}  # Initialize logos_data as an empty dictionary
         unique_labels = np.unique(self.labels)
         for label in unique_labels:
-            sub_msa = self.unique_sequences[sorted(self.selected_columns)].iloc[self.labels == label]
+            sub_msa = self.unique[sorted(self.selected_columns)].iloc[self.labels == label]
 
             # Calculate sequence frequencies for each position
             data = sub_msa.T.apply(lambda col: col.value_counts(normalize=True), axis=1).fillna(0)
@@ -840,7 +824,7 @@ def main():
     )
     
     # Custom usage message
-    usage = "python your_script.py MSA_FILE [OPTIONS]"
+    usage = "python protlearn.py MSA_FILE [OPTIONS]"
     parser.usage = usage
 
     # Define command-line arguments
@@ -848,71 +832,55 @@ def main():
         "data", type=str, help="Path to the MSA file"
     )
     parser.add_argument(
-        "--metadata", type=str, help="Path to the metadata file in tsv format."
+        "--metadata", type=str, default=None,
+        help="Path to the metadata file in tsv format. Optional."
     )
-
-    default_plot_methods = ['cleanse', 'reduce', 'cluster_sequences', 'select_residues']
     parser.add_argument(
-        '--plot-methods', 
-        type=str, 
-        nargs='*', 
-        default=default_plot_methods, 
-        help="List of methods for which plots should be generated. Default is all methods."
+        "--hide",
+        action="store_true",
+        help="Hide the output plots. By default, outputs are shown."
     )
-    
     parser.add_argument(
-        '--save-output', 
-        action='store_true', 
-        default=False,
-        help="Option to save the output. Default is False, set to True if argument is given."
-    )
-
-    parser.add_argument(
-        '--show-output', 
-        action='store_true', 
-        default=False,
-        help="Option to display the output. Default is False, set to True if argument is given."
-    )
-
-    parser.add_argument(
-        '--export', 
-        type=str, 
-        help="Path to save the export file. Optional."
+        '--export',
+        action="store_true",
+        help="Whether to export the MSA object as a pickle file. Optional."
     )
 
     args = parser.parse_args()
 
     try:
-        msa = MSA(args.data)
+        # Creates output directory if not exists
+        if not os.path.exists('./output'):
+            os.makedirs('./output')
+
+        # Initializes MSA object
+        msa = MSA(args.data, metadata=args.metadata)
         
-        if any([_should_plot(method, args) for method in ["cleanse", "reduce", "cluster_sequences", "select_residues"]]):
-            if _should_plot('cluster_sequences', args):
-                download_nltk_resources()
+        # Downloading nltk resources is only necessary for _plot_weblog, which requires metadata
+        if args.metadata:
+            download_nltk_resources()
+        
+        msa.map_positions()
 
-            msa.map_positions()
-
-            msa.cleanse(plot=_should_plot("cleanse", args), save=args.save_output, show=args.show_output)
-            msa.reduce(plot=_should_plot("reduce", args), save=args.save_output, show=args.show_output)
-            msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=_should_plot("cluster_sequences", args), save=args.save_output, show=args.show_output)
-            
-            if args.metadata:
-                msa.generate_wordclouds(metadata=args.metadata, save=args.save_output, show=args.show_output)
-            
-            msa.select_features(n_estimators=1000, random_state=42, plot=_should_plot("select_features", args), save=args.save_output, show=args.show_output)
-            msa.select_residues(top_n=3, plot=_should_plot("select_residues", args), save=args.save_output, show=args.show_output)
+        msa.cleanse(plot=True, save=True, show=(not args.hide))
+        msa.reduce(plot=True, save=True, show=(not args.hide))
+        msa.cluster(method='single-linkage', min_clusters=3, plot=True, save=True, show=(not args.hide))
+        msa.select_features(n_estimators=1000, random_state=42, plot=True, save=True, show=(not args.hide))
+        msa.select_residues(top_n=3, plot=True, save=True, show=(not args.hide))
 
         if args.export:
-            with open(args.export, "wb") as f:
+            filename = os.path.basename(args.data)
+            basename, _ = os.path.splitext(filename)
+            with open(f"./output/{basename}.pkl", "wb") as f:
                 pickle.dump(msa, f)
-        else:
-            print("Warning: No output method specified (neither plotting nor exporting). The program will produce no visible results.")
-            parser.print_help()
 
         return True
 
     except Exception as e:
-        print(f"An error occurred: {type(e).__name__} - {e}")
-        return False
+        raise
+
+    print("An unexpected error occurred.")
+    return False
 
 if __name__ == "__main__":
     try:
@@ -920,6 +888,6 @@ if __name__ == "__main__":
     except Exception as e:
         import traceback
         traceback.print_exc()  # This will print the full traceback
-        print(f"\nAn error occurred: {type(e).__name__} - {e}")
+        print(f"An error occurred: {type(e).__name__} - {e}")
         sys.exit(2)
 

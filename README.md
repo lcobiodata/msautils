@@ -141,12 +141,12 @@ Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce
   msa.cleanse()
   msa.reduce(plot=True)
 
-<a id="protlearn.MSA.cluster_sequences"></a>
+<a id="protlearn.MSA.cluster"></a>
 
 #### cluster\_sequences
 
 ```python
-def cluster_sequences(min_clusters=2,
+def cluster(min_clusters=2,
                       max_clusters=10,
                       method='single-linkage')
 ```
@@ -173,7 +173,7 @@ Cluster the MSA data and obtain cluster labels.
   msa = MSA('example.fasta')
   msa.map_positions()
   msa.cleanse()
-  msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True)
+  msa.cluster(method='single-linkage', min_clusters=3, plot=True)
 
 <a id="protlearn.MSA.generate_wordclouds"></a>
 
@@ -206,7 +206,7 @@ Generate word cloud visualizations from protein names in a DataFrame.
   msa = MSA('example.fasta')
   msa.map_positions()
   msa.cleanse()
-  msa.cluster_sequences(method='single-linkage', min_clusters=3)
+  msa.cluster(method='single-linkage', min_clusters=3)
   msa.generate_wordclouds(metadata='metadata.tsv', plot=True)
 
 <a id="protlearn.MSA.select_features"></a>
