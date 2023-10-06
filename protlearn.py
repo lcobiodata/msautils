@@ -211,7 +211,7 @@ class MSA(pd.DataFrame):
 
         # Calculate the minimum number of non-NaN values for columns
         min_cols = int(threshold * self.clean.shape[1])
-        # print(f"min_cols: {min_cols}")
+        print(f"min_cols: {min_cols}")
 
         # Remove rows with NaN values above the threshold
         self.clean.dropna(thresh=min_cols, axis=0, inplace=True)
@@ -222,6 +222,7 @@ class MSA(pd.DataFrame):
             .drop_duplicates() \
             .fillna('-') \
             .copy()
+        print(f"self.unique.shape after removing duplicate rows: {self.unique.shape}")
 
         # If plotting is enabled, plot heatmaps
         if plot:
@@ -569,14 +570,20 @@ class MSA(pd.DataFrame):
 
         Parameters:
             threshold (float, optional): The threshold for selecting residues based on their importance. Default is 0.9.
-            top_n (int, optional): Selects the top N residues based on their importance. If set to None, selection is based on the threshold. Default is None.
-            plot (bool, optional): If True, visual representation of the selected residues will be plotted. Default is False.
-            save (bool, optional): If True, the plot will be saved to a file. This parameter is considered only if `plot` is True. Default is False.
-            show (bool, optional): If True, the plot will be displayed. This parameter is considered only if `plot` is True. Default is True.
+            top_n (int, optional): Selects the top N residues based on their importance. If set to None, selection is
+            based on the threshold. Default is None.
+            plot (bool, optional): If True, visual representation of the selected residues will be plotted. Default is
+            False.
+            save (bool, optional): If True, the plot will be saved to a file. This parameter is considered only if
+            `plot` is True. Default is False.
+            show (bool, optional): If True, the plot will be displayed. This parameter is considered only if `plot` is
+            True. Default is True.
 
         Notes:
-        - This method selects residues that are candidates for Specificity-determining Positions (SDPs) based on their importance.
-        - The importance can be determined through various methods (e.g., feature importance from a classifier, conservation score).
+        - This method selects residues that are candidates for Specificity-determining Positions (SDPs) based on their
+        importance.
+        - The importance can be determined through various methods (e.g., feature importance from a classifier,
+        conservation score).
         - Selected residues can offer insights into the functional or structural significance in the protein family.
         """
         # Check attribute dependencies and run the dependent method if needed
@@ -693,9 +700,7 @@ class MSA(pd.DataFrame):
             save (bool, optional): Whether to save the generated logos (default is False).
             show (bool, optional): Whether to show the generated logos (default is False).
         """
-        if not plot:
-            return
-
+        print("Executing _plot_logos...")
         self.logos_data = {}  # Initialize logos_data as an empty dictionary
         unique_labels = np.unique(self.labels)
         for label in unique_labels:
@@ -715,17 +720,16 @@ class MSA(pd.DataFrame):
             raise ValueError(f"color scheme must be in {color_schemes_list}")
 
         n_labels = len(unique_labels)
-        fig, axs = plt.subplots(nrows=int(np.ceil(n_labels / 2)), ncols=2, figsize=(10, 5 * n_labels))
+        fig, axs = plt.subplots(nrows=n_labels, ncols=1, figsize=(10, 5 * n_labels))
 
-        # Ensure axs is always a 2D array, even when n_labels = 1
-        if n_labels == 1:
-            axs = np.array([[axs]])
+        # Ensure axs is always a 1D array
+        axs = np.array(axs, ndmin=1)
 
         for i, (label, data) in enumerate(self.logos_data.items()):
             msa_columns = data.index.tolist()
             data = data.reset_index(drop=True)
 
-            ax = axs[i // 2, i % 2]
+            ax = axs[i]  # Index into axs directly, as there's only one column
 
             # Create a sequence logo from the DataFrame, passing in the current axis
             seq_logo = lm.Logo(data, ax=ax, color_scheme=color_scheme, vpad=.1, width=.8)
@@ -734,27 +738,21 @@ class MSA(pd.DataFrame):
             seq_logo.style_spines(visible=False)
 
             ax.set_xticks(range(len(msa_columns)))
-            ax.set_xticklabels(msa_columns, fontsize=12)
-            ax.set_title(f"Label: {label}")
-
-        # Remove any unused subplots
-        if n_labels % 2 != 0:
-            axs[-1, -1].axis('off')
+            ax.set_xticklabels(msa_columns, fontsize=18)
+            # ax.set_title(f"Cluster: {label}")
 
         plt.tight_layout()
+        save_path = f"./output/sdp_combined_logo.png"
+        print(f"Saving to: {save_path}")
 
         if save:
             plt.savefig(f"./output/sdp_combined_logo.png")
+            print("Logo saved successfully!")
 
         if show:
             plt.show()
         else:
             plt.close()
-
-
-def _should_plot(method, args):
-    """Utility function to check if a particular method should plot."""
-    return method in args.plot_methods
 
 
 def main():
@@ -796,18 +794,18 @@ def main():
         if not os.path.exists('./output'):
             os.makedirs('./output')
 
-        # Initializes MSA object
-        msa = MSA(args.data, metadata=args.metadata)
-
         # Downloading nltk resources is only necessary for _plot_weblog, which requires metadata
         if args.metadata:
             download_nltk_resources()
 
+        # Initializes MSA object
+        msa = MSA(args.data, metadata_file=args.metadata or None)
+
         msa.map_positions()
 
         msa.cleanse(plot=True, save=True, show=(not args.hide))
-        msa.reduce(plot=True, save=True, show=(not args.hide))
-        msa.cluster(method='single-linkage', min_clusters=3, plot=True, save=True, show=(not args.hide))
+        msa.reduce()
+        msa.cluster(min_clusters=3, plot=True, save=True, show=(not args.hide))
         msa.select_features(n_estimators=1000, random_state=42, plot=True, save=True, show=(not args.hide))
         msa.select_residues(top_n=3, plot=True, save=True, show=(not args.hide))
 
