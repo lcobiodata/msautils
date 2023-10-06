@@ -34,7 +34,6 @@ from sklearn.feature_selection import SelectFromModel
 import re
 from prince import MCA
 from Bio.SeqUtils import seq3
-from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import fastcluster
 from scipy.cluster.hierarchy import fcluster
@@ -45,17 +44,20 @@ import sys
 import argparse
 import pickle
 
+
 def download_nltk_resources():
     nltk.download('punkt')
     nltk.download('stopwords')
     nltk.download('wordnet')
     nltk.download('omw-1.4')
 
+
 class MSA(pd.DataFrame):
     """
     A class for processing and analyzing Multiple Sequence Alignments (MSA).
     """
-    def __init__(self, msa_file=None, msa_format="fasta", metadata=None, *args, **kwargs):
+
+    def __init__(self, msa_file=None, metadata_file=None, msa_format="fasta", metadata=None, *args, **kwargs):
         """
         Initialize the MSA object.
 
@@ -88,21 +90,25 @@ class MSA(pd.DataFrame):
             super().__init__(data=data, index=index, *args, **kwargs)
         else:
             super().__init__(*args, **kwargs)
-        self.metadata = metadata
+        self.metadata_file = metadata_file
+        self.metadata = None
         self.positions_map = None  # Mapping of positions in the MSA
         self.dirty = None  # Dirty data (before cleansing)
         self.clean = None  # Clean data (after cleansing)
         self.unique = None  # Processed MSA data
-        self.mca = None  # Analysis results
+        self.mca = None  # MCA object containing Multidimensional Correspondence Analysis results
         self.coordinates = None  # Reduced data coordinates
+        self.tree = None
         self.labels = None  # Sequence labels or clusters
-        self.encoded = None # One-hot encoded data set
+        self.encoded = None  # One-hot encoded data set
         self.sorted_importance = None  # Sorted feature importances
-        self.selected_features = None  # Selected features
+        self.selected_features = None  # Selected featuresß
         self.selected_columns = None  # Selected columns from the data
         self.profiles = None  # Residue profiles
         self.wordcloud_data = None  # Word cloud data
         self.logos_data = None  # Logo data
+        # Find correspondence between MSA colums and residue positions in each sequence
+        self.map_positions()
 
     def map_positions(self):
         """
@@ -138,8 +144,9 @@ class MSA(pd.DataFrame):
         positions = msa.positions_map
         """
         if self.empty:
-            raise ValueError("The MSA data frame is empty. Ensure you've loaded the data correctly.")
-        
+            warnings.warn("The MSA data frame is empty. Ensure you've loaded the data correctly.", UserWarning)
+            return
+
         # Initialize a dictionary to store residue positions
         self.positions_map = defaultdict(dict)
 
@@ -173,7 +180,7 @@ class MSA(pd.DataFrame):
         """
         if self.empty:
             raise ValueError("The MSA data frame is empty. Ensure you've loaded the data correctly.")
-        
+
         # Define characters to remove based on parameters
         to_remove = [indel]
 
@@ -247,13 +254,15 @@ class MSA(pd.DataFrame):
         ax1.axis('off')  # Turn off axis labels for the first subplot
         ax2.axis('off')  # Turn off axis labels for the second subplot
 
-        if show:
-            plt.show()
-
         if save:
             plt.savefig("./output/cleanse_heatmaps.png", dpi=300)
 
-    def reduce(self, plot=False, save=False, show=True, *args, **kwargs):
+        if show:
+            plt.show()
+        else:
+            plt.close()
+
+    def reduce(self, *args, **kwargs):
         """
         Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce dimensionality.
 
@@ -278,7 +287,7 @@ class MSA(pd.DataFrame):
         if not hasattr(self, "unique") or self.unique is None:
             # Option 1: Automatically call cleanse
             self.cleanse()
-            
+
             # Option 2: Raise an exception (uncomment the below line and comment out Option 1 if you want this)
             # raise ValueError("self.unique is not set. Make sure to run self.cleanse() before calling self.reduce()")
 
@@ -288,81 +297,13 @@ class MSA(pd.DataFrame):
 
         self.coordinates = np.array(self.mca.transform(self.unique))
 
-        if plot:
-            self._plot_mca(save=save, show=show)
-
-    def _plot_mca(self, save=False, show=True):
-        """
-        Private method to plot the results of Multidimensional Correspondence Analysis (MCA).
-
-        Based on the MCA results, this method plots a scatter plot with sequences and residues overlaid.
-        When the number of rows exceeds a predefined limit (ROW_LIMIT), the method performs proportional sampling 
-        based on cluster sizes. This is done to ensure clarity in the visualization and optimize the performance.
-        
-        Parameters:
-        - save (bool): If True, the plot will be saved to a specified path.
-        - show (bool): If True, the plot will be displayed immediately.
-
-        Notes:
-        - If the number of unique sequences exceeds the ROW_LIMIT, the method resorts to proportional sampling.
-        - For the sampling, if clustering labels are not previously generated, the method will execute the clustering 
-          step and then sample according to the cluster sizes.
-        
-        Usage:
-        msa = MSA('example.fasta')
-        msa.map_positions()
-        msa.cleanse()
-        msa.reduce()
-        msa._plot_mca(save=True, show=False) # This will only save the plot and not display it.
-        """
-        ROW_LIMIT = 5000
-
-        # Define the dummy function do_not_show
-        def do_not_show(*args, **kwargs):
-            pass
-        
-        # Check if rows exceed the limit
-        if len(self.unique) > ROW_LIMIT:
-            params = {'plot': False, 'save': False, 'show': False}
-            sample = self.unique.sample(n=5000, random_state=42)
-            obj = MSA(data=sample, index=sample.index)
-            obj.cleanse(**params)
-            obj.reduce(**params)
-        else:
-            obj = self
-        
-        # If we don't want to show the plot, redirect plt.show()
-        if not show:
-            original_show = plt.show
-            plt.show = do_not_show
-
-        # Plot the data
-        try:
-            obj.mca.plot(
-                obj.unique,
-                x_component=0,
-                y_component=1
-            )
-            # If you want to save the plot
-            if save:
-                plt.savefig("./output/mca_plot.png", dpi=300)
-        except Exception as e:
-            warnings.warn(f"Unable to plot mca results: {e}", UserWarning)
-        finally:
-            pass
-
-        # If we saved the show, revert plt.show() back to its original state
-        if not show:
-            plt.show = original_show
-
-    def cluster(self, min_clusters=2, max_clusters=10, method='single-linkage', plot=False, save=False, show=False, **kwargs):
+    def cluster(self, min_clusters=2, max_clusters=10, plot=False, save=False, show=False, **kwargs):
         """
         Cluster the MSA data and obtain cluster labels.
 
         Parameters:
             min_clusters (int, optional): Minimum number of clusters (default is 2).
             max_clusters (int, optional): Maximum number of clusters (default is 10).
-            method (str, optional): Clustering method ('k-means' or 'single-linkage') (default is 'single-linkage').
             plot (bool, optional): If True, the clustering results will be plotted (default is False).
             save (bool, optional): If True and `plot` is also True, the plotted results will be saved to a file.
             show (bool, optional): If True and `plot` is also True, the plotted results will be displayed.
@@ -370,7 +311,7 @@ class MSA(pd.DataFrame):
 
         Notes:
         - This method performs clustering on the MSA data and assigns cluster labels to sequences.
-        - Clustering can be done using either k-means or single-linkage methods.
+        - Clustering is done using the single-linkage method.
         - The optimal number of clusters is determined using silhouette scores.
         - The cluster labels are stored in the 'labels' attribute of the MSA object.
 
@@ -378,53 +319,36 @@ class MSA(pd.DataFrame):
         msa = MSA('example.fasta')
         msa.map_positions()
         msa.cleanse()
-        msa.cluster(method='single-linkage', min_clusters=3, plot=True, save=True)
+        msa.cluster(min_clusters=3, plot=True, save=True)
         """
         # Check attribute dependencies and run the dependent method if needed
-        if not hasattr(self, 'coordinates') or  self.coordinates is None:
+        if not hasattr(self, 'coordinates') or self.coordinates is None:
             self.reduce()  # Assuming this is the method that populates self.coordinates
 
-        if method not in ['k-means', 'single-linkage']:
-            raise ValueError("method must be 'k-means' or 'single-linkage")
-
         # Define a range of potential numbers of clusters to evaluate
-        k_values = range(min_clusters, max_clusters)
+        k_values = range(min_clusters, max_clusters + 1)
+        silhouette_scores = []
+
+        # Calculate the linkage once
+        self.tree = fastcluster.linkage(self.coordinates, method='ward')
+
         # Perform clustering for different numbers of clusters and compute silhouette scores
-        model, silhouette_scores = None, []
-        for k in range(min_clusters, max_clusters + 1):
-            if method == 'k-means':
-                model = KMeans(n_clusters=k, n_init=max_clusters)  # Set n_init explicitly
-                model.fit(self.coordinates)
-                labels = model.labels_
-                score = silhouette_score(self.coordinates, labels)
-                silhouette_scores.append(score)
-            elif method == 'single-linkage':
-                # Run clustermap with potential performance improvement
-                model = fastcluster.linkage(self.coordinates, method='ward')
-                # Calculate silhouette score for each value of k
-                labels = fcluster(model, k, criterion='maxclust')
-                silhouette_scores.append(silhouette_score(self.coordinates, labels))
+        for k in k_values:
+            # Calculate silhouette score for each value of k
+            labels = fcluster(self.tree, k, criterion='maxclust')
+            silhouette_scores.append(silhouette_score(self.coordinates, labels))
 
         # Find the index of the maximum silhouette score
         best_index = np.argmax(silhouette_scores)
-        # Perform the actual modeling depending on the chosen algorithm
-        if method == 'k-means':
-            # Find the best number of clusters based on the highest silhouette score
-            best_num_clusters = best_index + min_clusters
-            # Perform clustering with the best number of clusters
-            model = KMeans(n_clusters=best_num_clusters, n_init=max_clusters)
-            model.fit(self.coordinates)
-            self.labels = model.labels_
-        elif method == 'single-linkage':
-            # Get the best value of k
-            best_k = k_values[best_index]
-            # Get the cluster labels for each sequence in the MSA
-            self.labels = fcluster(model, best_k, criterion='maxclust')
+
+        # Get the best value of k and get the cluster labels for each sequence in the MSA
+        best_k = k_values[best_index]
+        self.labels = fcluster(self.tree, best_k, criterion='maxclust')
 
         if plot:
             self._plot_wordclouds(save=save, show=show, **kwargs)
 
-    def _plot_wordclouds(self, metadata=None, column='Protein names', save=False, show=False):
+    def _plot_wordclouds(self, column='Protein names', save=False, show=False):
         """
         Generate and plot word cloud visualizations from protein names in a DataFrame.
 
@@ -437,14 +361,12 @@ class MSA(pd.DataFrame):
         This method extracts substrate and enzyme names from the specified column using regular expressions,
         normalizes the names, and creates word cloud plots for each cluster of sequences.
         """
-        # If metadata is None, default to self.metadata
-        metadata = metadata or self.metadata
 
-        if metadata is not None:
-            
+        if self.metadata_file is not None:
+
             # Read the TSV file into a DataFrame
             try:
-                metadata = pd.read_csv(metadata, delimiter='\t')
+                self.metadata = pd.read_csv(self.metadata_file, delimiter='\t')
             except FileNotFoundError:
                 raise
 
@@ -456,7 +378,7 @@ class MSA(pd.DataFrame):
                 headers = self.index[indices]
                 entry_names = [header.split('/')[0] for header in headers]
 
-                result = metadata[metadata['Entry Name'].isin(entry_names)].copy()
+                result = self.metadata[self.metadata['Entry Name'].isin(entry_names)].copy()
 
                 matches = result[column].str.extract(r'(.+?) ([\w\-,]+ase)', flags=re.IGNORECASE)
 
@@ -494,14 +416,16 @@ class MSA(pd.DataFrame):
                 ax.imshow(wordcloud, interpolation='bilinear')
                 ax.axis('off')
 
-            if show:
-                plt.show()
-
             if save:
                 plt.savefig("./output/wordclould.png")
 
+            if show:
+                plt.show()
+            else:
+                plt.close()
+
         else:
-            warnings.warn("metadata is not provided and self.metadata is not set. Please provide the 'metadata' argument or set self.metadata.", UserWarning)
+            warnings.warn("self.metadata is not set. Please set self.metadata.", UserWarning)
 
     def select_features(self, n_estimators=None, random_state=None, plot=False, save=False, show=False):
         """
@@ -604,28 +528,40 @@ class MSA(pd.DataFrame):
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=90)
         plt.setp(ax2.xaxis.get_majorticklabels(), rotation=90)
 
-        if show:
-            plt.show()
-
         if save:
             plt.savefig("./output/pareto_chart.png")
 
-    def _plot_clustermap(self, save=False, show=False):
-        """
-        Generate and display a clustermap of the encoded data using seaborn.        
-        """
-        plt.figure(figsize=(16, 16))
-        g = sns.clustermap(self.encoded, method="single", cmap="viridis", standard_scale=1)
-
-        # Hide xticks and yticks
-        g.ax_heatmap.set_xticks([])
-        g.ax_heatmap.set_yticks([])
-
-        if save:
-            plt.savefig("./output/clustermap.png")
-
         if show:
             plt.show()
+        else:
+            plt.close()
+
+    def _plot_clustermap(self, save=False, show=False):
+        """
+        Generate and display a clustermap of the encoded data using seaborn.
+        """
+        # 'Before' cluster map
+        g1 = sns.clustermap(self.encoded, method="single", cmap="viridis", standard_scale=1)
+
+        # Hide xticks and yticks for 'Before' cluster map
+        g1.ax_heatmap.set_xticks([])
+        g1.ax_heatmap.set_yticks([])
+
+        plt.savefig("./output/clustermap_before.png") if save else None
+        plt.show() if show else plt.close()
+
+        # Get encoded data with only the selected columns
+        selected_encoded = self.encoded[self.selected_features]
+
+        # 'After' cluster map using precomputed dendrogram
+        g2 = sns.clustermap(selected_encoded, method="single", cmap="viridis", standard_scale=1, row_linkage=self.tree)
+
+        # Hide xticks and yticks for 'After' cluster map
+        g2.ax_heatmap.set_xticks([])
+        g2.ax_heatmap.set_yticks([])
+
+        plt.savefig("./output/clustermap_after.png") if save else None
+        plt.show() if show else plt.close()
 
     def select_residues(self, threshold=0.9, top_n=None, plot=False, save=False, show=True, **kwargs):
         """
@@ -644,9 +580,10 @@ class MSA(pd.DataFrame):
         - Selected residues can offer insights into the functional or structural significance in the protein family.
         """
         # Check attribute dependencies and run the dependent method if needed
-        if not hasattr(self, 'selected_features') or self.selected_features is None or not hasattr(self, 'sorted_importance') or self.sorted_importance is None:
-
-            self.select_features(plot=False, save=False, show=False, **kwargs)  # Assuming this is the method that populates self.sorted_importance
+        if not hasattr(self, 'selected_features') or self.selected_features is None or not hasattr(self,
+                                                                                                   'sorted_importance') or self.sorted_importance is None:
+            self.select_features(plot=False, save=False, show=False,
+                                 **kwargs)  # Assuming this is the method that populates self.sorted_importance
 
         # Calculate cumulative sum of importance
         cumulative_importance = np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance)
@@ -735,11 +672,13 @@ class MSA(pd.DataFrame):
 
         plt.grid()
 
-        if show:
-            plt.show()
-
         if save:
             plt.savefig("./output/perceptual_map.png")
+
+        if show:
+            plt.show()
+        else:
+            plt.close()
 
     def _plot_logos(self, color_scheme='NajafabadiEtAl2017', plot=False, save=False, show=False, **kwargs):
         """
@@ -769,14 +708,15 @@ class MSA(pd.DataFrame):
             self.logos_data[label] = data
 
         color_schemes = lm.list_color_schemes()
-        color_schemes_list = sorted(color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values)
+        color_schemes_list = sorted(
+            color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values)
 
         if color_scheme not in color_schemes_list:
             raise ValueError(f"color scheme must be in {color_schemes_list}")
 
         n_labels = len(unique_labels)
         fig, axs = plt.subplots(nrows=int(np.ceil(n_labels / 2)), ncols=2, figsize=(10, 5 * n_labels))
-        
+
         # Ensure axs is always a 2D array, even when n_labels = 1
         if n_labels == 1:
             axs = np.array([[axs]])
@@ -784,7 +724,7 @@ class MSA(pd.DataFrame):
         for i, (label, data) in enumerate(self.logos_data.items()):
             msa_columns = data.index.tolist()
             data = data.reset_index(drop=True)
-            
+
             ax = axs[i // 2, i % 2]
 
             # Create a sequence logo from the DataFrame, passing in the current axis
@@ -792,7 +732,7 @@ class MSA(pd.DataFrame):
 
             # Customize the appearance of the logo
             seq_logo.style_spines(visible=False)
-            
+
             ax.set_xticks(range(len(msa_columns)))
             ax.set_xticklabels(msa_columns, fontsize=12)
             ax.set_title(f"Label: {label}")
@@ -808,11 +748,14 @@ class MSA(pd.DataFrame):
 
         if show:
             plt.show()
+        else:
+            plt.close()
 
 
 def _should_plot(method, args):
     """Utility function to check if a particular method should plot."""
     return method in args.plot_methods
+
 
 def main():
     """
@@ -822,7 +765,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Process Multiple Sequence Alignment (MSA) data."
     )
-    
+
     # Custom usage message
     usage = "python protlearn.py MSA_FILE [OPTIONS]"
     parser.usage = usage
@@ -855,11 +798,11 @@ def main():
 
         # Initializes MSA object
         msa = MSA(args.data, metadata=args.metadata)
-        
+
         # Downloading nltk resources is only necessary for _plot_weblog, which requires metadata
         if args.metadata:
             download_nltk_resources()
-        
+
         msa.map_positions()
 
         msa.cleanse(plot=True, save=True, show=(not args.hide))
@@ -882,12 +825,13 @@ def main():
     print("An unexpected error occurred.")
     return False
 
+
 if __name__ == "__main__":
     try:
         sys.exit(0 if main() else 1)
     except Exception as e:
         import traceback
+
         traceback.print_exc()  # This will print the full traceback
         print(f"An error occurred: {type(e).__name__} - {e}")
         sys.exit(2)
-

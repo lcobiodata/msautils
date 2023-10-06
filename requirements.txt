@@ -8,7 +8,7 @@ scikit-learn~=1.2.2
 scipy==1.10.1
 seaborn~=0.12.2
 setuptools==67.7.2
-biopython~=1.5.9  # Check the version you are using
+biopython~=1.59
 nltk~=3.8.1
 fastcluster~=1.2.6
 wordcloud~=1.9.2
