@@ -33,10 +33,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectFromModel
 import re
 from prince import MCA
+from kneed import KneeLocator
+import networkx as nx
 from Bio.SeqUtils import seq3
 from sklearn.metrics import silhouette_score
 import fastcluster
-from scipy.cluster.hierarchy import fcluster
+from scipy.cluster.hierarchy import fcluster, dendrogram
 from collections import defaultdict
 import logomaker as lm
 import os
@@ -50,6 +52,10 @@ def download_nltk_resources():
     nltk.download('stopwords')
     nltk.download('wordnet')
     nltk.download('omw-1.4')
+
+
+# Obtain the viridis colormap
+viridis = plt.cm.get_cmap('viridis')
 
 
 class MSA(pd.DataFrame):
@@ -101,8 +107,10 @@ class MSA(pd.DataFrame):
         self.tree = None
         self.labels = None  # Sequence labels or clusters
         self.encoded = None  # One-hot encoded data set
-        self.sorted_importance = None  # Sorted feature importances
-        self.selected_features = None  # Selected featuresß
+        self.sequence_order = None
+        self.residue_order = None
+        self.sorted_importance = None  # Sorted feature importance
+        self.selected_features = None  # Selected features
         self.selected_columns = None  # Selected columns from the data
         self.profiles = None  # Residue profiles
         self.wordcloud_data = None  # Word cloud data
@@ -166,6 +174,45 @@ class MSA(pd.DataFrame):
                         # Store the residue position in the positions_map dictionary
                         self.positions_map[header][index] = position
 
+    def _plot_cleanse_heatmaps(self, save=False, show=False):
+        """
+        Generate and display cleansing heatmaps plot on the specified axes.
+        """
+        # Create a figure with two subplots (heatmaps)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+
+        # Create the heatmap before cleansing on the first Axes
+        ax1 = axes[0]  # First subplot
+        heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
+
+        # Adjust the position of the first subplot
+        ax1.set_position([0.05, 0.1, 0.4, 0.8])  # [left, bottom, width, height]
+
+        # Create the heatmap after cleansing on the second Axes
+        ax2 = axes[1]  # Second subplot
+        heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
+
+        # Adjust the position of the second subplot
+        ax2.set_position([0.55, 0.1, 0.4, 0.8])  # [left, bottom, width, height]
+
+        # Create a color bar axis between the two heatmaps
+        cax = fig.add_axes([0.46, 0.1, 0.02, 0.8])  # [left, bottom, width, height]
+
+        # Add a color bar with the color bar axis
+        cbar = plt.colorbar(heatmap_before, cax=cax)
+        cbar.set_label('Gaps (Indels)')
+
+        ax1.axis('off')  # Turn off axis labels for the first subplot
+        ax2.axis('off')  # Turn off axis labels for the second subplot
+
+        if save:
+            plt.savefig("./output/cleanse_heatmaps.png", dpi=300)
+
+        if show:
+            plt.show()
+        else:
+            plt.close()
+
     def cleanse(self, indel='-', remove_lowercase=True, threshold=.9, plot=False, save=False, show=False):
         """
         Cleanse the MSA data by removing columns and rows with gaps/indels.
@@ -195,83 +242,165 @@ class MSA(pd.DataFrame):
 
         # Replace specified characters with NaN
         self.dirty.replace(to_remove, np.nan, inplace=True)
-        print(f"self.dirty.shape after replacing specified characters with NaN: {self.dirty.shape}")
+        # print(f"self.dirty.shape after replacing specified characters with NaN: {self.dirty.shape}")
 
         # Create a copy of 'dirty' data as the 'clean' data
         self.clean = self.dirty.copy()
-        print(f"self.clean.shape right after creating a copy of 'dirty' data as the 'clean' data: {self.clean.shape}")
+        # print(f"self.clean.shape right after creating a copy of 'dirty' data as the 'clean' data: {self.clean.shape}")
 
         # Calculate the minimum number of non-NaN values for rows
         min_rows = int(threshold * self.clean.shape[0])
-        print(f"min_rows: {min_rows}")
+        # print(f"min_rows: {min_rows}")
 
         # Remove columns with NaN values above the threshold
         self.clean.dropna(thresh=min_rows, axis=1, inplace=True)
-        print(f"self.clean.shape after removing columns with NaN values above the threshold: {self.clean.shape}")
+        # print(f"self.clean.shape after removing columns with NaN values above the threshold: {self.clean.shape}")
 
         # Calculate the minimum number of non-NaN values for columns
         min_cols = int(threshold * self.clean.shape[1])
-        print(f"min_cols: {min_cols}")
+        # print(f"min_cols: {min_cols}")
 
         # Remove rows with NaN values above the threshold
         self.clean.dropna(thresh=min_cols, axis=0, inplace=True)
-        print(f"self.clean.shape after removing rows with NaN values above the threshold: {self.clean.shape}")
+        # print(f"self.clean.shape after removing rows with NaN values above the threshold: {self.clean.shape}")
 
         # Reset the index, drop duplicates, and fill NaN values with '-'
         self.unique = self.clean.reset_index(drop=True) \
             .drop_duplicates() \
             .fillna('-') \
             .copy()
-        print(f"self.unique.shape after removing duplicate rows: {self.unique.shape}")
+        # print(f"self.unique.shape after removing duplicate rows: {self.unique.shape}")
 
         # If plotting is enabled, plot heatmaps
         if plot:
             self._plot_cleanse_heatmaps(save=save, show=show)
 
-    def _plot_cleanse_heatmaps(self, save=False, show=False):
+    def _plot_scree(self, elbow=None, save=False, show=True):
         """
-        Generate and display cleansing heatmaps plot on the specified axes.
+        Plots the scree plot of the squared eigenvalues of self.mca.eigenvalues_.
+
+        Parameters:
+            save (bool, optional): If True, the scree plot will be saved to a file.
+            show (bool, optional): If True, the scree plot will be displayed.
         """
-        # Create a figure with two subplots (heatmaps)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        squared_eigenvalues = np.square(self.mca.eigenvalues_)
+        max_dim = min(len(squared_eigenvalues), 20)
 
-        # Create the heatmap before cleansing on the first Axes
-        ax1 = axes[0]  # First subplot
-        heatmap_before = ax1.imshow(self.dirty.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
-
-        # Create the heatmap after cleansing on the second Axes
-        ax2 = axes[1]  # Second subplot
-        heatmap_after = ax2.imshow(self.clean.isna().astype(int), cmap='viridis', aspect='auto', extent=[0, 1, 0, 1])
-
-        # Create a shared color bar axis
-        cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # Adjust the position and size as needed
-
-        # Add color bars to the right of the heatmaps with the shared color bar axis
-        cbar_before = plt.colorbar(heatmap_before, cax=cax)
-        cbar_before.set_label('Gaps (Indels)')
-        cbar_after = plt.colorbar(heatmap_after, cax=cax)  # Use the same color bar axis
-        cbar_after.set_label('Gaps (Indels)')
-
-        ax1.axis('off')  # Turn off axis labels for the first subplot
-        ax2.axis('off')  # Turn off axis labels for the second subplot
+        plt.figure(figsize=(12, 4))
+        plt.plot(range(1, max_dim + 1), squared_eigenvalues[:max_dim], marker='o', linestyle='-', color=viridis(0.2))
+        if elbow is not None:
+            plt.axvline(x=elbow, color=viridis(0.8), linestyle='--')
+        plt.xlabel('Dimensions', fontsize=14)
+        plt.xticks(ticks=range(1, max_dim + 1))
+        plt.ylabel('Variance Explained (Eigenvalue\u00b2)', fontsize=14)
+        # plt.title('Scree Plot')
 
         if save:
-            plt.savefig("./output/cleanse_heatmaps.png", dpi=300)
+            plt.savefig("./output/scree_plot_squared_eigenvalues.png")
 
         if show:
             plt.show()
         else:
             plt.close()
 
-    def reduce(self, *args, **kwargs):
+    def _plot_perceptual_map(self, processed=False, save=False, show=True):
+        """
+        Generate and display a perceptual map of residues, either selected or all.
+
+        Parameters:
+            processed (bool, optional): Determines the type of plot. If True, visualizes selected residues with clustering.
+                                        If False, visualizes all sequences and residues without any selection or labeling.
+                                        Default is True.
+            save (bool, optional): If True, the generated perceptual map will be saved to a file. Default is False.
+            show (bool, optional): If True, the generated perceptual map will be displayed immediately. Default is True.
+
+        Notes:
+        - This method is designed to visualize the residues on a perceptual map.
+        - The perceptual map can offer insights into the distribution, clustering, or relationships of the residues based on certain metrics or dimensions.
+        - This is particularly useful for understanding the spatial arrangement or similarity of residues in some context.
+        """
+        # Create figure
+        plt.figure(figsize=(8, 6))
+
+        if processed:
+            selected_residues = [
+                feature for feature in self.selected_features if int(feature.split('_')[0]) in self.selected_columns
+            ]
+            df_res = self.mca.column_coordinates(self.unique[self.selected_columns]).loc[selected_residues]
+            residues = []
+            for res_idx in df_res.index:
+                msa_column, amino_acid = res_idx.split('_')
+                three_letter_aa = seq3(amino_acid)
+                residues.append(three_letter_aa + msa_column)
+            df_res = df_res.set_index(pd.Index(residues))
+
+            # Create legends for cluster labels
+            unique_labels = np.unique(self.labels)
+            legend_handles = []
+            # Iterate through unique labels
+            for label in unique_labels:
+                indices = np.where(self.labels == label)[0]
+                plt.scatter(
+                    self.coordinates[indices, 0],
+                    self.coordinates[indices, 1],
+                    color=plt.cm.viridis(label / len(unique_labels)),
+                    alpha=0.5
+                )
+                legend_handles.append(
+                    plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {label}', markersize=10,
+                               markerfacecolor=plt.cm.viridis(label / len(unique_labels)))
+                )
+
+            # Scatter plot of labeled residues
+            plt.scatter(df_res[0], df_res[1], marker='*', color='black', s=50)
+
+            # Annotate labeled residues
+            for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
+                plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
+
+            legend_handles.append(
+                plt.Line2D([0], [0], marker='*', color='k', alpha=0.5, label='Selected Residues', markersize=10)
+            )
+
+            plt.legend(handles=legend_handles, title='Sequence Clusters')
+
+        else:  # if processed is False
+            # Scatter plot for sequences
+            plt.scatter(self.coordinates[:, 0], self.coordinates[:, 1], marker='o', color=viridis(0.7), alpha=0.5,
+                        label='Sequences')
+
+            # Scatter plot for all residues
+            df_res_all = self.mca.column_coordinates(self.unique)
+            plt.scatter(df_res_all[0], df_res_all[1], marker='*', color='black', alpha=0.5, label='Residues')
+            plt.legend()
+
+        # Set labels, title, and grid
+        plt.xlabel('Dimension 1')
+        plt.ylabel('Dimension 2')
+        plt.grid()
+
+        if save:
+            plt.savefig(f"./output/perceptual_map_{'after' if processed else 'before'}.png")
+
+        if show:
+            plt.show()
+        else:
+            plt.close()
+
+    def reduce(self, n_components=None, criterion='explained_variance', explained_variance_threshold=0.95, plot=False,
+               save=False,
+               show=False, *args, **kwargs):
         """
         Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce dimensionality.
 
-        Parameters:
-            plot (bool, optional): If True, the MCA results will be plotted (default is False).
-            save (bool, optional): If True and `plot` is also True, the plotted results will be saved to a file.
-            show (bool, optional): If True and `plot` is also True, the plotted results will be displayed.
-            *args, **kwargs: Additional arguments and keyword arguments passed to the MCA.
+        Parameters: n_components (int, optional): Number of dimensions to retain. If None, it will be determined
+        based on the criterion. criterion (str, optional): Criterion to decide on the number of dimensions. Options:
+        'scree', 'explained_variance'. Default is 'scree'. explained_variance_threshold (float, optional): Threshold
+        for cumulative explained variance, used when criterion='explained_variance'. Default is 0.95. plot (bool,
+        optional): If True, the MCA results will be plotted (default is False). save (bool, optional): If True and
+        `plot` is also True, the plotted results will be saved to a file. show (bool, optional): If True and `plot`
+        is also True, the plotted results will be displayed. *args, **kwargs: Additional arguments and keyword
+        arguments passed to the MCA.
 
         Notes:
         - Multidimensional Correspondence Analysis (MCA) is used to reduce the dimensionality of the MSA data.
@@ -286,68 +415,78 @@ class MSA(pd.DataFrame):
         """
         # Check if unique exists and is not None
         if not hasattr(self, "unique") or self.unique is None:
-            # Option 1: Automatically call cleanse
             self.cleanse()
 
-            # Option 2: Raise an exception (uncomment the below line and comment out Option 1 if you want this)
-            # raise ValueError("self.unique is not set. Make sure to run self.cleanse() before calling self.reduce()")
-
         # Perform MCA
-        self.mca = MCA(*args, **kwargs)
+        self.mca = MCA(n_components=min(self.unique.shape[0], self.unique.shape[1]) - 1,
+                       *args, **kwargs)
         self.mca.fit(self.unique)
 
-        self.coordinates = np.array(self.mca.transform(self.unique))
+        # Decide on the number of dimensions if n_components is None
+        if n_components is None:
+            squared_eigenvalues = np.square(self.mca.eigenvalues_)
 
-    def cluster(self, min_clusters=2, max_clusters=10, plot=False, save=False, show=False, **kwargs):
-        """
-        Cluster the MSA data and obtain cluster labels.
+            if criterion == 'scree':
+                # Use the KneeLocator to find the elbow
+                kn = KneeLocator(range(1, len(squared_eigenvalues) + 1), squared_eigenvalues,
+                                 curve='convex', direction='decreasing')
+                n_components = kn.elbow
 
-        Parameters:
-            min_clusters (int, optional): Minimum number of clusters (default is 2).
-            max_clusters (int, optional): Maximum number of clusters (default is 10).
-            plot (bool, optional): If True, the clustering results will be plotted (default is False).
-            save (bool, optional): If True and `plot` is also True, the plotted results will be saved to a file.
-            show (bool, optional): If True and `plot` is also True, the plotted results will be displayed.
-            **kwargs: Additional keyword arguments passed to the clustering method.
+            elif criterion == 'explained_variance':
+                cumulative_var = np.cumsum(squared_eigenvalues) / np.sum(squared_eigenvalues)
+                n_components = np.argmax(cumulative_var > explained_variance_threshold) + 1
 
-        Notes:
-        - This method performs clustering on the MSA data and assigns cluster labels to sequences.
-        - Clustering is done using the single-linkage method.
-        - The optimal number of clusters is determined using silhouette scores.
-        - The cluster labels are stored in the 'labels' attribute of the MSA object.
-
-        Example:
-        msa = MSA('example.fasta')
-        msa.map_positions()
-        msa.cleanse()
-        msa.cluster(min_clusters=3, plot=True, save=True)
-        """
-        # Check attribute dependencies and run the dependent method if needed
-        if not hasattr(self, 'coordinates') or self.coordinates is None:
-            self.reduce()  # Assuming this is the method that populates self.coordinates
-
-        # Define a range of potential numbers of clusters to evaluate
-        k_values = range(min_clusters, max_clusters + 1)
-        silhouette_scores = []
-
-        # Calculate the linkage once
-        self.tree = fastcluster.linkage(self.coordinates, method='ward')
-
-        # Perform clustering for different numbers of clusters and compute silhouette scores
-        for k in k_values:
-            # Calculate silhouette score for each value of k
-            labels = fcluster(self.tree, k, criterion='maxclust')
-            silhouette_scores.append(silhouette_score(self.coordinates, labels))
-
-        # Find the index of the maximum silhouette score
-        best_index = np.argmax(silhouette_scores)
-
-        # Get the best value of k and get the cluster labels for each sequence in the MSA
-        best_k = k_values[best_index]
-        self.labels = fcluster(self.tree, best_k, criterion='maxclust')
+        transformed_data = self.mca.transform(self.unique)
+        self.coordinates = transformed_data.iloc[:, :n_components].values
 
         if plot:
-            self._plot_wordclouds(save=save, show=show, **kwargs)
+            self._plot_scree(elbow=n_components, save=save, show=show)
+            self._plot_perceptual_map(processed=False, save=save, show=show)
+
+    # def _plot_dendrogram(self, save=False, show=False):
+    #     """
+    #     Generate and display a dendrogram from the linkage results with best k clusters highlighted.
+    #
+    #     Parameters:
+    #         save (bool, optional): Whether to save the generated dendrogram (default is False).
+    #         show (bool, optional): Whether to display the dendrogram (default is False).
+    #     """
+    #     if not hasattr(self, 'tree') or self.tree is None:
+    #         raise ValueError("The linkage tree is not set. Ensure you have run self.cluster() before calling "
+    #                          "self._plot_dendrogram().")
+    #
+    #     if not hasattr(self, 'labels') or self.labels is None:
+    #         raise ValueError("Cluster labels are not set. Ensure you have run self.cluster() before calling "
+    #                          "self._plot_dendrogram().")
+    #
+    #     # Get the number of unique clusters from the cluster labels
+    #     num_clusters = len(np.unique(self.labels))
+    #
+    #     # Get the maximum distance at which the desired number of clusters is formed
+    #     max_d = max([self.tree[i, 2] for i in range(self.tree.shape[0]) if
+    #                  len(np.unique(fcluster(self.tree, t=self.tree[i, 2], criterion='distance'))) == num_clusters])
+    #
+    #     # Plot the dendrogram
+    #     plt.set_cmap('viridis') # This line seems to make no difference for mapping color...
+    #     plt.figure(figsize=(10, 6))
+    #     dendrogram(
+    #         self.tree,
+    #         color_threshold=max_d,
+    #         above_threshold_color='grey',
+    #         no_labels=True
+    #     )
+    #
+    #     # Set title and save/show the plot
+    #     plt.xlabel('Sequences')
+    #     plt.ylabel('Distance')
+    #
+    #     if save:
+    #         plt.savefig('./output/dendrogram.png')
+    #
+    #     if show:
+    #         plt.show()
+    #     else:
+    #         plt.close()
 
     def _plot_wordclouds(self, column='Protein names', save=False, show=False):
         """
@@ -428,24 +567,194 @@ class MSA(pd.DataFrame):
         else:
             warnings.warn("self.metadata is not set. Please set self.metadata.", UserWarning)
 
-    def select_features(self, n_estimators=None, random_state=None, plot=False, save=False, show=False):
+    def cluster(self, min_clusters=2, max_clusters=10, plot=False, save=False, show=False, **kwargs):
         """
-        Select important features (residues) from the MSA data.
+        Cluster the MSA data and obtain cluster labels.
 
         Parameters:
-            n_estimators (int, optional): Parameter n_estimators for RandomForest.
-            random_state: (int, optional): Parameter random_state for RandomForest.
-            plot (bool, optional): Whether to plot feature selection results (default is False).
-            save (bool, optional): Whether to save feature selection results (default is False).
-            show (bool, optional): Whether to show feature selection results (default is False).
+            min_clusters (int, optional): Minimum number of clusters (default is 2).
+            max_clusters (int, optional): Maximum number of clusters (default is 10).
+            plot (bool, optional): If True, the clustering results will be plotted (default is False).
+            save (bool, optional): If True and `plot` is also True, the plotted results will be saved to a file.
+            show (bool, optional): If True and `plot` is also True, the plotted results will be displayed.
+            **kwargs: Additional keyword arguments passed to the clustering method.
+
+        Notes:
+        - This method performs clustering on the MSA data and assigns cluster labels to sequences.
+        - Clustering is done using the single-linkage method.
+        - The optimal number of clusters is determined using silhouette scores.
+        - The cluster labels are stored in the 'labels' attribute of the MSA object.
+
+        Example:
+        msa = MSA('example.fasta')
+        msa.map_positions()
+        msa.cleanse()
+        msa.cluster(min_clusters=3, plot=True, save=True)
+        """
+        # Check attribute dependencies and run the dependent method if needed
+        if not hasattr(self, 'coordinates') or self.coordinates is None:
+            self.reduce()  # Assuming this is the method that populates self.coordinates
+
+        # Define a range of potential numbers of clusters to evaluate
+        k_values = range(min_clusters, max_clusters + 1)
+        silhouette_scores = []
+
+        # Calculate the linkage once
+        self.tree = fastcluster.linkage(self.coordinates, method='ward')
+
+        # Perform clustering for different numbers of clusters and compute silhouette scores
+        for k in k_values:
+            # Calculate silhouette score for each value of k
+            labels = fcluster(self.tree, k, criterion='maxclust')
+            silhouette_scores.append(silhouette_score(self.coordinates, labels))
+
+        # Find the index of the maximum silhouette score
+        best_index = np.argmax(silhouette_scores)
+
+        # Get the best value of k and get the cluster labels for each sequence in the MSA
+        best_k = k_values[best_index]
+        self.labels = fcluster(self.tree, best_k, criterion='maxclust')
+
+        if plot:
+            # self._plot_dendrogram(save=save, show=show)
+            self._plot_wordclouds(save=save, show=show, **kwargs)
+
+    def _plot_clustermap(self, processed=False, save=False, show=False):
+        """
+        Generate and display a clustermap of the encoded data using seaborn.
+
+        Parameters:
+            processed (bool, optional): If True, generates the 'after' clustermap using selected features.
+                                        If False, generates the 'before' clustermap using all features.
+            save (bool, optional): Whether to save the generated clustermap (default is False).
+            show (bool, optional): Whether to display the generated clustermap (default is False).
+        """
+        if not processed:
+            # 'Before' cluster map
+            g = sns.clustermap(self.encoded, method="average", cmap="viridis")
+
+        else:
+            # Get encoded data with only the selected columns
+            selected_encoded = self.encoded[self.selected_features]
+
+            # 'After' cluster map using precomputed dendrogram
+            g = sns.clustermap(selected_encoded, method="average", cmap="viridis", row_linkage=self.tree)
+
+        # Store clustered order
+        self.sequence_order = g.dendrogram_row.reordered_ind
+        self.residue_order = g.dendrogram_col.reordered_ind
+
+        # Hide xticks and yticks for 'After' cluster map
+        g.ax_heatmap.set_xticks([])
+        g.ax_heatmap.set_yticks([])
+
+        save_path = f"./output/clustermap_{'after' if processed else 'before'}.png"
+
+        if save:
+            plt.savefig(save_path)
+        if show:
+            plt.show()
+        else:
+            plt.close()
+
+    # def _plot_bipartite(self, save=False, show=False):
+    #     """
+    #     Generate and display a bipartite graph representing the adjacency between sequences and residues.
+    #
+    #     Parameters:
+    #         save (bool, optional): Whether to save the generated graph (default is False).
+    #         show (bool, optional): Whether to display the generated graph (default is False).
+    #
+    #     Notes:
+    #     - The bipartite graph offers insights into the relationships between sequences and residues.
+    #     - The graph can be particularly useful for understanding the associations or connections between sequences and specific residues.
+    #     """
+    #     # Check if the required attributes are set
+    #     required_attrs = ['sequence_order', 'residue_order']
+    #     for attr in required_attrs:
+    #         if not hasattr(self, attr):
+    #             raise ValueError(f"The attribute {attr} is not set. Ensure you have run self._plot_clustermap() "
+    #                              f"before calling self._plot_bipartite().")
+    #
+    #     # Get data based on the processed flag
+    #     data = self.encoded[self.selected_features]
+    #
+    #     # Create a new graph instance
+    #     B = nx.Graph()
+    #
+    #     # Add nodes with the bipartite attribute
+    #     B.add_nodes_from(data.index, bipartite=0)  # Add sequences
+    #     B.add_nodes_from(data.columns, bipartite=1)  # Add residues
+    #
+    #     # Add edges based on the adjacency (i.e., a connection between a sequence and a residue)
+    #     for seq in data.index:
+    #         for residue in data.columns:
+    #             if data.loc[seq, residue] == 1:  # Adjust this condition based on your encoding
+    #                 B.add_edge(seq, residue)
+    #
+    #     # Position nodes
+    #     pos = {}
+    #     max_order = max(len(self.sequence_order), len(self.residue_order))
+    #
+    #     # Position sequences
+    #     for i, seq_idx in enumerate(self.sequence_order):
+    #         seq = data.index[seq_idx]
+    #         pos[seq] = (0, i * max_order / len(self.sequence_order))
+    #     # Position residues
+    #     for i, residue_idx in enumerate(self.residue_order):
+    #         residue = data.columns[residue_idx]
+    #         pos[residue] = (1, i * max_order / len(self.residue_order))
+    #
+    #     # Color sequences based on their cluster labels
+    #     if not hasattr(self, 'labels') or self.labels is None:
+    #         raise ValueError("Cluster labels are not set. Ensure you have run self.cluster() before calling this "
+    #                          "method.")
+    #
+    #     # Convert labels to colors
+    #     cmap = plt.cm.viridis
+    #     norm = plt.Normalize(vmin=min(self.labels), vmax=max(self.labels))
+    #     seq_colors = [cmap(norm(label)) for label in self.labels]
+    #
+    #     plt.figure(figsize=(10, 8))
+    #
+    #     # Draw sequences with circles and residues with triangles, adjust sizes and transparency
+    #     nx.draw_networkx_nodes(B, pos, nodelist=data.index, node_color=seq_colors, node_shape='o', alpha=0.1,
+    #                            node_size=200)
+    #     nx.draw_networkx_nodes(B, pos, nodelist=data.columns, node_color='black', node_shape='*', alpha=0.1,
+    #                            node_size=200)
+    #
+    #     # Draw edges with transparency
+    #     nx.draw_networkx_edges(B, pos, alpha=0.005)
+    #
+    #     if save:
+    #         save_path = "./output/bipartite_graph.png"
+    #         plt.savefig(save_path)
+    #
+    #     if show:
+    #         plt.show()
+    #     else:
+    #         plt.close()
+
+    def encode(self, plot=False, save=False, show=False):
+        """
+        One-hot encodes the MSA data and optionally plots a clustermap of the encoded data.
+
+        This method encodes the MSA data using one-hot encoding. It then stores
+        the encoded data frame in the 'encoded' attribute of the object. If desired,
+        the method can also generate and optionally save a clustermap visualization
+        of the encoded data before any feature selection is performed.
+
+        Parameters:
+            plot (bool, optional): Whether to plot the generated clustermap (default is False).
+            save (bool, optional): Whether to save the generated clustermap (default is False).
+            show (bool, optional): Whether to display the generated clustermap (default is False).
         """
         # Check attribute dependencies and run the dependent method if needed
         if not hasattr(self, 'labels') or self.labels is None:
             self.cluster()  # Assuming this is the method that populates self.labels
 
-        # Extract X (features) and y (labels)
+        # Extract X (features)
         x = self.unique
-        y = pd.get_dummies(self.labels).astype(int) if len(np.unique(self.labels)) > 2 else self.labels
 
         # Perform one-hot encoding on the categorical features
         encoder = OneHotEncoder()
@@ -460,48 +769,22 @@ class MSA(pd.DataFrame):
                 encoded_feature_names.append(feature_name)
 
         # Convert X_encoded to DataFrame
-        x_encoded_df = pd.DataFrame.sparse.from_spmatrix(x_encoded, columns=encoded_feature_names)
-
-        # Create and train the Random Forest classifier
-        rf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
-        rf.fit(x_encoded_df, y)
-
-        # Feature selection
-        feature_selector = SelectFromModel(rf, threshold='median')
-        feature_selector.fit_transform(x_encoded_df, y)
-        selected_feature_indices = feature_selector.get_support(indices=True)
-        selected_features = x_encoded_df.columns[selected_feature_indices]
-
-        # Calculate feature importances for original columns
-        sorted_importance = pd.DataFrame(
-            {
-                'Residues': selected_features,
-                'Importance': rf.feature_importances_[selected_feature_indices],
-                'Columns': map(lambda ftr: int(ftr.split('_')[0]), selected_features)
-            }
-        )[['Columns', 'Importance']].groupby('Columns').sum()['Importance'].sort_values(ascending=False)
-
-        # Store the encoded data frame
-        self.encoded = x_encoded_df
-
-        # Store the selected features and their importances
-        self.selected_features = selected_features
-        self.sorted_importance = sorted_importance
+        self.encoded = pd.DataFrame.sparse.from_spmatrix(x_encoded, columns=encoded_feature_names)
 
         if plot:
-            self._plot_clustermap(save=save, show=show)
-            self._plot_pareto(save=save, show=show)
+            # Generate the 'before' clustermap
+            self._plot_clustermap(processed=False, save=save, show=show)
 
     def _plot_pareto(self, save=False, show=True):
         """
-        Generate and display a Pareto plot of the feature importances.
+        Generate and display a Pareto plot of the feature importance.
 
         Parameters:
             save (bool, optional): If True, the plotted results will be saved to a file (default is False).
             show (bool, optional): If True, the plotted results will be displayed (default is True).
-        
+
         Notes:
-        - This method produces a Pareto plot that visualizes the distribution of feature importances.
+        - This method produces a Pareto plot that visualizes the distribution of feature importance.
         - This plot can be useful in understanding which features contribute the most to model performance.
         """
         sorted_features = self.sorted_importance.index
@@ -509,17 +792,17 @@ class MSA(pd.DataFrame):
         # Create a figure with two y-axes
         fig, ax1 = plt.subplots(figsize=(16, 4))
 
-        # Bar chart of percentage importance
+        # Bar chart of percentage importance using a color near the beginning of the colormap
         xvalues = range(len(sorted_features))
-        ax1.bar(xvalues, self.sorted_importance, color='cyan')
+        ax1.bar(xvalues, self.sorted_importance, color=viridis(0.2))
         ax1.set_ylabel('Summed Importance', fontsize=16)
         ax1.tick_params(axis='y', labelsize=12)
 
         # Create a second y-axis for the line chart
         ax2 = ax1.twinx()
 
-        # Line chart of cumulative percentage importance
-        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color='magenta',
+        # Line chart of cumulative percentage importance using a color near the end of the colormap
+        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color=viridis(0.8),
                  marker='.')
         ax2.set_ylabel('Cumulative Importance', fontsize=16)
         ax2.tick_params(axis='y', labelsize=12)
@@ -537,32 +820,108 @@ class MSA(pd.DataFrame):
         else:
             plt.close()
 
-    def _plot_clustermap(self, save=False, show=False):
+    def select_features(self, n_estimators=None, random_state=None, plot=False, save=False, show=False):
         """
-        Generate and display a clustermap of the encoded data using seaborn.
+        Select important features (residues) from the encoded MSA data using RandomForest.
+
+        Parameters:
+            n_estimators (int, optional): Parameter n_estimators for RandomForest.
+            random_state: (int, optional): Parameter random_state for RandomForest.
+            plot (bool, optional): Whether to plot feature selection results (default is False).
+            save (bool, optional): Whether to save feature selection results (default is False).
+            show (bool, optional): Whether to show feature selection results (default is False).
         """
-        # 'Before' cluster map
-        g1 = sns.clustermap(self.encoded, method="single", cmap="viridis", standard_scale=1)
+        # Check if the data has been encoded
+        if not hasattr(self, 'encoded'):
+            self.encode()
 
-        # Hide xticks and yticks for 'Before' cluster map
-        g1.ax_heatmap.set_xticks([])
-        g1.ax_heatmap.set_yticks([])
+        # Extract y (labels)
+        y = pd.get_dummies(self.labels).astype(int) if len(np.unique(self.labels)) > 2 else self.labels
 
-        plt.savefig("./output/clustermap_before.png") if save else None
-        plt.show() if show else plt.close()
+        # Create and train the Random Forest classifier
+        rf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
+        rf.fit(self.encoded, y)
 
-        # Get encoded data with only the selected columns
-        selected_encoded = self.encoded[self.selected_features]
+        # Feature selection
+        feature_selector = SelectFromModel(rf, threshold='median')
+        feature_selector.fit_transform(self.encoded, y)
+        selected_feature_indices = feature_selector.get_support(indices=True)
+        selected_features = self.encoded.columns[selected_feature_indices]
 
-        # 'After' cluster map using precomputed dendrogram
-        g2 = sns.clustermap(selected_encoded, method="single", cmap="viridis", standard_scale=1, row_linkage=self.tree)
+        # Calculate feature importance for original columns
+        sorted_importance = pd.DataFrame(
+            {
+                'Residues': selected_features,
+                'Importance': rf.feature_importances_[selected_feature_indices],
+                'Columns': map(lambda ftr: int(ftr.split('_')[0]), selected_features)
+            }
+        )[['Columns', 'Importance']].groupby('Columns').sum()['Importance'].sort_values(ascending=False)
 
-        # Hide xticks and yticks for 'After' cluster map
-        g2.ax_heatmap.set_xticks([])
-        g2.ax_heatmap.set_yticks([])
+        # Store the selected features and their importance
+        self.selected_features = selected_features
+        self.sorted_importance = sorted_importance
 
-        plt.savefig("./output/clustermap_after.png") if save else None
-        plt.show() if show else plt.close()
+        if plot:
+            self._plot_clustermap(processed=True, save=save, show=show)
+            # self._plot_bipartite(save=save, show=show)
+            self._plot_pareto(save=save, show=show)
+
+    def _plot_logos(self, color_scheme='NajafabadiEtAl2017', save=False, show=False, **kwargs):
+        """
+        Generate and plot logos from the MSA data for each cluster label.
+
+        This method generates and plots the logos using the dmslogo library.
+        It plots the logos for each cluster label and displays them in a single figure.
+
+        Parameters:
+            color_scheme (str, optional): The color scheme for plotting (default is 'NajafabadiEtAl2017').
+            plot (bool, optional): Whether to plot the generated logos (default is False).
+            save (bool, optional): Whether to save the generated logos (default is False).
+            show (bool, optional): Whether to show the generated logos (default is False).
+        """
+        print("Executing _plot_logos...")
+        self.logos_data = {}
+        unique_labels = np.unique(self.labels)
+
+        for label in unique_labels:
+            sub_msa = self.unique[sorted(self.selected_columns)].iloc[self.labels == label]
+            data = sub_msa.T.apply(lambda col: col.value_counts(normalize=True), axis=1).fillna(0)
+            self.logos_data[label] = data
+
+        color_schemes = lm.list_color_schemes()
+        color_schemes_list = sorted(
+            color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values
+        )
+
+        if color_scheme not in color_schemes_list:
+            raise ValueError(f"color scheme must be in {color_schemes_list}")
+
+        n_labels = len(unique_labels)
+        fig, axs = plt.subplots(nrows=n_labels, ncols=1, figsize=(8, 4 * n_labels), sharex=True)
+        axs = np.array(axs, ndmin=1)
+
+        for i, (label, data) in enumerate(self.logos_data.items()):
+            msa_columns = data.index.tolist()
+            data = data.reset_index(drop=True)
+            ax = axs[i]
+            seq_logo = lm.Logo(data, ax=ax, color_scheme=color_scheme, vpad=.1, width=.8)
+            seq_logo.style_spines(visible=False)
+            ax.set_xticks(range(len(msa_columns)))
+            ax.set_xticklabels(msa_columns, fontsize=24)
+            ax.tick_params(axis='y', labelsize=12)  # Increase y-ticks fontsize
+
+        plt.tight_layout()
+        save_path = f"./output/sdp_combined_logo.png"
+        print(f"Saving to: {save_path}")
+
+        if save:
+            plt.savefig(f"./output/sdp_combined_logo.png")
+            print("Logo saved successfully!")
+
+        if show:
+            plt.show()
+        else:
+            plt.close()
 
     def select_residues(self, threshold=0.9, top_n=None, plot=False, save=False, show=True, **kwargs):
         """
@@ -612,147 +971,8 @@ class MSA(pd.DataFrame):
         self.profiles.index = self.index
 
         if plot:
-            self._plot_perceptual_map(save=save, show=show)
+            self._plot_perceptual_map(processed=True, save=save, show=show)
             self._plot_logos(save=save, show=show, **kwargs)
-
-    def _plot_perceptual_map(self, save=False, show=True):
-        """
-        Generate and display a perceptual map of selected residues.
-
-        Parameters:
-            save (bool, optional): If True, the generated perceptual map will be saved to a file. Default is False.
-            show (bool, optional): If True, the generated perceptual map will be displayed immediately. Default is True.
-
-        Notes:
-        - This method is designed to visualize the selected residues on a perceptual map. 
-        - The perceptual map can offer insights into the distribution, clustering, or relationships of the residues based on certain metrics or dimensions.
-        - This is particularly useful for understanding the spatial arrangement or similarity of residues in some context.
-        """
-        selected_residues = [
-            feature for feature in self.selected_features if int(feature.split('_')[0]) in self.selected_columns
-        ]
-        df_res = self.mca.column_coordinates(self.unique[self.selected_columns]).loc[selected_residues]
-        residues = []
-        for res_idx in df_res.index:
-            msa_column, amino_acid = res_idx.split('_')
-            three_letter_aa = seq3(amino_acid)
-            residues.append(three_letter_aa + msa_column)
-        df_res = df_res.set_index(pd.Index(residues))
-
-        # Create figure
-        plt.figure(figsize=(8, 6))
-
-        # Create legends for cluster labels
-        unique_labels = np.unique(self.labels)
-        legend_handles = []
-        # Iterate through unique labels
-        for label in unique_labels:
-            # Find indices where the labels array matches the current label
-            indices = np.where(self.labels == label)[0]
-            plt.scatter(
-                self.coordinates[indices, 0],
-                self.coordinates[indices, 1],
-                color=plt.cm.viridis(label / len(unique_labels)),
-                alpha=0.5
-            )
-            legend_handles.append(
-                plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {label}', markersize=10,
-                           markerfacecolor=plt.cm.viridis(label / len(unique_labels)))
-            )
-
-        # Scatter plot of labeled residues
-        plt.scatter(df_res[0], df_res[1], marker='*', color='black', s=50)
-
-        # Annotate labeled residues
-        for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
-            plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
-
-        legend_handles.append(
-            plt.Line2D([0], [0], marker='*', color='k', label='Selected Residues', markersize=10)
-        )
-
-        # Set labels and title
-        plt.xlabel('Dimension 1')
-        plt.ylabel('Dimension 2')
-
-        plt.legend(handles=legend_handles, title='Sequence Clusters')
-
-        plt.grid()
-
-        if save:
-            plt.savefig("./output/perceptual_map.png")
-
-        if show:
-            plt.show()
-        else:
-            plt.close()
-
-    def _plot_logos(self, color_scheme='NajafabadiEtAl2017', plot=False, save=False, show=False, **kwargs):
-        """
-        Generate and plot logos from the MSA data for each cluster label.
-
-        This method generates and plots the logos using the dmslogo library.
-        It plots the logos for each cluster label and displays them in a single figure.
-
-        Parameters:
-            color_scheme (str, optional): The color scheme for plotting (default is 'NajafabadiEtAl2017').
-            plot (bool, optional): Whether to plot the generated logos (default is False).
-            save (bool, optional): Whether to save the generated logos (default is False).
-            show (bool, optional): Whether to show the generated logos (default is False).
-        """
-        print("Executing _plot_logos...")
-        self.logos_data = {}  # Initialize logos_data as an empty dictionary
-        unique_labels = np.unique(self.labels)
-        for label in unique_labels:
-            sub_msa = self.unique[sorted(self.selected_columns)].iloc[self.labels == label]
-
-            # Calculate sequence frequencies for each position
-            data = sub_msa.T.apply(lambda col: col.value_counts(normalize=True), axis=1).fillna(0)
-
-            # Store the seq_logo in logos_data with the label as the key
-            self.logos_data[label] = data
-
-        color_schemes = lm.list_color_schemes()
-        color_schemes_list = sorted(
-            color_schemes.loc[color_schemes.characters == 'ACDEFGHIKLMNPQRSTVWY'].color_scheme.values)
-
-        if color_scheme not in color_schemes_list:
-            raise ValueError(f"color scheme must be in {color_schemes_list}")
-
-        n_labels = len(unique_labels)
-        fig, axs = plt.subplots(nrows=n_labels, ncols=1, figsize=(10, 5 * n_labels))
-
-        # Ensure axs is always a 1D array
-        axs = np.array(axs, ndmin=1)
-
-        for i, (label, data) in enumerate(self.logos_data.items()):
-            msa_columns = data.index.tolist()
-            data = data.reset_index(drop=True)
-
-            ax = axs[i]  # Index into axs directly, as there's only one column
-
-            # Create a sequence logo from the DataFrame, passing in the current axis
-            seq_logo = lm.Logo(data, ax=ax, color_scheme=color_scheme, vpad=.1, width=.8)
-
-            # Customize the appearance of the logo
-            seq_logo.style_spines(visible=False)
-
-            ax.set_xticks(range(len(msa_columns)))
-            ax.set_xticklabels(msa_columns, fontsize=18)
-            # ax.set_title(f"Cluster: {label}")
-
-        plt.tight_layout()
-        save_path = f"./output/sdp_combined_logo.png"
-        print(f"Saving to: {save_path}")
-
-        if save:
-            plt.savefig(f"./output/sdp_combined_logo.png")
-            print("Logo saved successfully!")
-
-        if show:
-            plt.show()
-        else:
-            plt.close()
 
 
 def main():
