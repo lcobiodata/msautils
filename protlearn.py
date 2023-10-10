@@ -25,6 +25,7 @@ import numpy as np
 from Bio import SeqIO
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.ndimage import zoom
 from wordcloud import WordCloud
 import nltk
 import warnings
@@ -55,7 +56,7 @@ def download_nltk_resources():
 
 
 # Obtain the viridis colormap
-viridis = plt.cm.get_cmap('viridis')
+my_palette = plt.cm.get_cmap('viridis')
 
 
 class MSA(pd.DataFrame):
@@ -287,9 +288,9 @@ class MSA(pd.DataFrame):
         max_dim = min(len(squared_eigenvalues), 20)
 
         plt.figure(figsize=(12, 4))
-        plt.plot(range(1, max_dim + 1), squared_eigenvalues[:max_dim], marker='o', linestyle='-', color=viridis(0.2))
+        plt.plot(range(1, max_dim + 1), squared_eigenvalues[:max_dim], marker='o', linestyle='-', color=my_palette(0.2))
         if elbow is not None:
-            plt.axvline(x=elbow, color=viridis(0.8), linestyle='--')
+            plt.axvline(x=elbow, color=my_palette(0.8), linestyle='--')
         plt.xlabel('Dimensions', fontsize=14)
         plt.xticks(ticks=range(1, max_dim + 1))
         plt.ylabel('Variance Explained (Eigenvalue\u00b2)', fontsize=14)
@@ -343,35 +344,36 @@ class MSA(pd.DataFrame):
                 plt.scatter(
                     self.coordinates[indices, 0],
                     self.coordinates[indices, 1],
-                    color=plt.cm.viridis(label / len(unique_labels)),
+                    color=my_palette(label / len(unique_labels)),
                     alpha=0.5
                 )
                 legend_handles.append(
                     plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {label}', markersize=10,
-                               markerfacecolor=plt.cm.viridis(label / len(unique_labels)))
+                               markerfacecolor=my_palette(label / len(unique_labels)))
                 )
 
             # Scatter plot of labeled residues
-            plt.scatter(df_res[0], df_res[1], marker='*', color='black', s=50)
+            plt.scatter(df_res[0], df_res[1], marker='*', color='black', alpha=0.5, s=50)
 
             # Annotate labeled residues
             for i, (x, y) in enumerate(zip(df_res[0], df_res[1])):
                 plt.annotate(df_res.index[i], (x, y), textcoords="offset points", xytext=(0, 10), ha='center')
 
             legend_handles.append(
-                plt.Line2D([0], [0], marker='*', color='k', alpha=0.5, label='Selected Residues', markersize=10)
+                # plt.Line2D([0], [0], marker='*', color='k', alpha=0.5, label='Selected Residues', markersize=10)
+                plt.scatter([0], [0], marker='*', color='black', alpha=0.5, label='Selected Residues')
             )
 
             plt.legend(handles=legend_handles, title='Sequence Clusters')
 
         else:  # if processed is False
             # Scatter plot for sequences
-            plt.scatter(self.coordinates[:, 0], self.coordinates[:, 1], marker='o', color=viridis(0.7), alpha=0.5,
+            plt.scatter(self.coordinates[:, 0], self.coordinates[:, 1], marker='o', color=my_palette(0.5), alpha=0.5,
                         label='Sequences')
 
             # Scatter plot for all residues
             df_res_all = self.mca.column_coordinates(self.unique)
-            plt.scatter(df_res_all[0], df_res_all[1], marker='*', color='black', alpha=0.5, label='Residues')
+            plt.scatter(df_res_all[0], df_res_all[1], marker='*', color='black', alpha=0.5, s=50, label='Residues')
             plt.legend()
 
         # Set labels, title, and grid
@@ -443,51 +445,6 @@ class MSA(pd.DataFrame):
             self._plot_scree(elbow=n_components, save=save, show=show)
             self._plot_perceptual_map(processed=False, save=save, show=show)
 
-    # def _plot_dendrogram(self, save=False, show=False):
-    #     """
-    #     Generate and display a dendrogram from the linkage results with best k clusters highlighted.
-    #
-    #     Parameters:
-    #         save (bool, optional): Whether to save the generated dendrogram (default is False).
-    #         show (bool, optional): Whether to display the dendrogram (default is False).
-    #     """
-    #     if not hasattr(self, 'tree') or self.tree is None:
-    #         raise ValueError("The linkage tree is not set. Ensure you have run self.cluster() before calling "
-    #                          "self._plot_dendrogram().")
-    #
-    #     if not hasattr(self, 'labels') or self.labels is None:
-    #         raise ValueError("Cluster labels are not set. Ensure you have run self.cluster() before calling "
-    #                          "self._plot_dendrogram().")
-    #
-    #     # Get the number of unique clusters from the cluster labels
-    #     num_clusters = len(np.unique(self.labels))
-    #
-    #     # Get the maximum distance at which the desired number of clusters is formed
-    #     max_d = max([self.tree[i, 2] for i in range(self.tree.shape[0]) if
-    #                  len(np.unique(fcluster(self.tree, t=self.tree[i, 2], criterion='distance'))) == num_clusters])
-    #
-    #     # Plot the dendrogram
-    #     plt.set_cmap('viridis') # This line seems to make no difference for mapping color...
-    #     plt.figure(figsize=(10, 6))
-    #     dendrogram(
-    #         self.tree,
-    #         color_threshold=max_d,
-    #         above_threshold_color='grey',
-    #         no_labels=True
-    #     )
-    #
-    #     # Set title and save/show the plot
-    #     plt.xlabel('Sequences')
-    #     plt.ylabel('Distance')
-    #
-    #     if save:
-    #         plt.savefig('./output/dendrogram.png')
-    #
-    #     if show:
-    #         plt.show()
-    #     else:
-    #         plt.close()
-
     def _plot_wordclouds(self, column='Protein names', save=False, show=False):
         """
         Generate and plot word cloud visualizations from protein names in a DataFrame.
@@ -542,7 +499,7 @@ class MSA(pd.DataFrame):
 
             # Plotting logic
             num_clusters = len(self.wordcloud_data)
-            fig, axs = plt.subplots(num_clusters, 1, figsize=(10, 6 * num_clusters))
+            fig, axs = plt.subplots(num_clusters, 1, figsize=(8, 4 * num_clusters))
 
             for i, (label, wordcloud_text) in enumerate(self.wordcloud_data.items()):
                 ax = axs[i] if num_clusters > 1 else axs
@@ -629,16 +586,21 @@ class MSA(pd.DataFrame):
             save (bool, optional): Whether to save the generated clustermap (default is False).
             show (bool, optional): Whether to display the generated clustermap (default is False).
         """
-        if not processed:
-            # 'Before' cluster map
-            g = sns.clustermap(self.encoded, method="average", cmap="viridis")
+        data = self.encoded[self.selected_features] if processed else self.encoded
 
-        else:
-            # Get encoded data with only the selected columns
-            selected_encoded = self.encoded[self.selected_features]
+        # # Upscale the data
+        # upscaled = zoom(data, zoom=2, order=1)  # Here, 3 is the zoom factor, adjust as needed
 
+        params = {
+            "method": "average", "cmap": "viridis"  # , "figsize": (6, 6)
+        }
+
+        if processed:
             # 'After' cluster map using precomputed dendrogram
-            g = sns.clustermap(selected_encoded, method="average", cmap="viridis", row_linkage=self.tree)
+            params.update({"row_linkage": self.tree})
+
+        # g = sns.clustermap(upscaled, **params)
+        g = sns.clustermap(data, **params)
 
         # Store clustered order
         self.sequence_order = g.dendrogram_row.reordered_ind
@@ -656,84 +618,6 @@ class MSA(pd.DataFrame):
             plt.show()
         else:
             plt.close()
-
-    # def _plot_bipartite(self, save=False, show=False):
-    #     """
-    #     Generate and display a bipartite graph representing the adjacency between sequences and residues.
-    #
-    #     Parameters:
-    #         save (bool, optional): Whether to save the generated graph (default is False).
-    #         show (bool, optional): Whether to display the generated graph (default is False).
-    #
-    #     Notes:
-    #     - The bipartite graph offers insights into the relationships between sequences and residues.
-    #     - The graph can be particularly useful for understanding the associations or connections between sequences and specific residues.
-    #     """
-    #     # Check if the required attributes are set
-    #     required_attrs = ['sequence_order', 'residue_order']
-    #     for attr in required_attrs:
-    #         if not hasattr(self, attr):
-    #             raise ValueError(f"The attribute {attr} is not set. Ensure you have run self._plot_clustermap() "
-    #                              f"before calling self._plot_bipartite().")
-    #
-    #     # Get data based on the processed flag
-    #     data = self.encoded[self.selected_features]
-    #
-    #     # Create a new graph instance
-    #     B = nx.Graph()
-    #
-    #     # Add nodes with the bipartite attribute
-    #     B.add_nodes_from(data.index, bipartite=0)  # Add sequences
-    #     B.add_nodes_from(data.columns, bipartite=1)  # Add residues
-    #
-    #     # Add edges based on the adjacency (i.e., a connection between a sequence and a residue)
-    #     for seq in data.index:
-    #         for residue in data.columns:
-    #             if data.loc[seq, residue] == 1:  # Adjust this condition based on your encoding
-    #                 B.add_edge(seq, residue)
-    #
-    #     # Position nodes
-    #     pos = {}
-    #     max_order = max(len(self.sequence_order), len(self.residue_order))
-    #
-    #     # Position sequences
-    #     for i, seq_idx in enumerate(self.sequence_order):
-    #         seq = data.index[seq_idx]
-    #         pos[seq] = (0, i * max_order / len(self.sequence_order))
-    #     # Position residues
-    #     for i, residue_idx in enumerate(self.residue_order):
-    #         residue = data.columns[residue_idx]
-    #         pos[residue] = (1, i * max_order / len(self.residue_order))
-    #
-    #     # Color sequences based on their cluster labels
-    #     if not hasattr(self, 'labels') or self.labels is None:
-    #         raise ValueError("Cluster labels are not set. Ensure you have run self.cluster() before calling this "
-    #                          "method.")
-    #
-    #     # Convert labels to colors
-    #     cmap = plt.cm.viridis
-    #     norm = plt.Normalize(vmin=min(self.labels), vmax=max(self.labels))
-    #     seq_colors = [cmap(norm(label)) for label in self.labels]
-    #
-    #     plt.figure(figsize=(10, 8))
-    #
-    #     # Draw sequences with circles and residues with triangles, adjust sizes and transparency
-    #     nx.draw_networkx_nodes(B, pos, nodelist=data.index, node_color=seq_colors, node_shape='o', alpha=0.1,
-    #                            node_size=200)
-    #     nx.draw_networkx_nodes(B, pos, nodelist=data.columns, node_color='black', node_shape='*', alpha=0.1,
-    #                            node_size=200)
-    #
-    #     # Draw edges with transparency
-    #     nx.draw_networkx_edges(B, pos, alpha=0.005)
-    #
-    #     if save:
-    #         save_path = "./output/bipartite_graph.png"
-    #         plt.savefig(save_path)
-    #
-    #     if show:
-    #         plt.show()
-    #     else:
-    #         plt.close()
 
     def encode(self, plot=False, save=False, show=False):
         """
@@ -794,7 +678,7 @@ class MSA(pd.DataFrame):
 
         # Bar chart of percentage importance using a color near the beginning of the colormap
         xvalues = range(len(sorted_features))
-        ax1.bar(xvalues, self.sorted_importance, color=viridis(0.2))
+        ax1.bar(xvalues, self.sorted_importance, color=my_palette(0.2))
         ax1.set_ylabel('Summed Importance', fontsize=16)
         ax1.tick_params(axis='y', labelsize=12)
 
@@ -802,7 +686,7 @@ class MSA(pd.DataFrame):
         ax2 = ax1.twinx()
 
         # Line chart of cumulative percentage importance using a color near the end of the colormap
-        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color=viridis(0.8),
+        ax2.plot(xvalues, np.cumsum(self.sorted_importance) / np.sum(self.sorted_importance), color=my_palette(0.8),
                  marker='.')
         ax2.set_ylabel('Cumulative Importance', fontsize=16)
         ax2.tick_params(axis='y', labelsize=12)
@@ -863,7 +747,6 @@ class MSA(pd.DataFrame):
 
         if plot:
             self._plot_clustermap(processed=True, save=save, show=show)
-            # self._plot_bipartite(save=save, show=show)
             self._plot_pareto(save=save, show=show)
 
     def _plot_logos(self, color_scheme='NajafabadiEtAl2017', save=False, show=False, **kwargs):
@@ -1020,14 +903,16 @@ def main():
 
         # Initializes MSA object
         msa = MSA(args.data, metadata_file=args.metadata or None)
-
-        msa.map_positions()
-
-        msa.cleanse(plot=True, save=True, show=(not args.hide))
-        msa.reduce()
-        msa.cluster(min_clusters=3, plot=True, save=True, show=(not args.hide))
-        msa.select_features(n_estimators=1000, random_state=42, plot=True, save=True, show=(not args.hide))
-        msa.select_residues(top_n=3, plot=True, save=True, show=(not args.hide))
+        viz_params = {
+            'plot': True,
+            'save': True,
+            'show': not args.hide
+        }
+        msa.cleanse(**viz_params)
+        msa.reduce(n_components=3, **viz_params)
+        msa.cluster(**viz_params)
+        msa.select_features(n_estimators=1000, random_state=42, **viz_params)
+        msa.select_residues(top_n=3, **viz_params)
 
         if args.export:
             filename = os.path.basename(args.data)
@@ -1039,9 +924,6 @@ def main():
 
     except Exception as e:
         raise
-
-    print("An unexpected error occurred.")
-    return False
 
 
 if __name__ == "__main__":
