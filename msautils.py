@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Protlearn is a module that applies Machine Learning techniques to extract meaningful information from
+MSA Utils is a module that applies Machine Learning techniques to extract meaningful information from
 Multiple Sequence Alignments (MSA) of homologous protein families.
 
 Copyright (C) 2023, Lucas Carrijo de Oliveira (lucas@ebi.ac.uk)
