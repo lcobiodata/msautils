@@ -1,8 +1,8 @@
-<a id="protlearn"></a>
+<a id="msautils"></a>
 
-# protlearn
+# MSA Utils
 
-Protlearn is a module that applies Machine Learning techniques to extract meaningful information from
+MSA Utils is a module that applies Machine Learning techniques to extract meaningful information from
 Multiple Sequence Alignments (MSA) of homologous protein families.
 
 Copyright (C) 2023, Lucas Carrijo de Oliveira (lucas@ebi.ac.uk)
@@ -20,7 +20,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-<a id="protlearn.MSA"></a>
+<a id="msautils.MSA"></a>
 
 ## MSA Objects
 
@@ -30,7 +30,7 @@ class MSA(pd.DataFrame)
 
 A class for processing and analyzing Multiple Sequence Alignments (MSA).
 
-<a id="protlearn.MSA.__init__"></a>
+<a id="msautils.MSA.__init__"></a>
 
 #### \_\_init\_\_
 
@@ -45,7 +45,7 @@ Initialize the MSA object.
 - `*args` - Variable-length positional arguments.
 - `**kwargs` - Variable-length keyword arguments.
 
-<a id="protlearn.MSA.map_positions"></a>
+<a id="msautils.MSA.map_positions"></a>
 
 #### map\_positions
 
@@ -87,7 +87,7 @@ of residues in the MSA.
   Access the mapping:
   positions = msa.positions_map
 
-<a id="protlearn.MSA.cleanse"></a>
+<a id="msautils.MSA.cleanse"></a>
 
 #### cleanse
 
@@ -111,7 +111,7 @@ Cleanse the MSA data by removing columns and rows with gaps/indels.
 - `save` _bool, optional_ - Whether to save a heatmap of gaps/indels (default is False).
 - `show` _bool, optional_ - Whether to show a heatmap of gaps/indels (default is False).
 
-<a id="protlearn.MSA.reduce"></a>
+<a id="msautils.MSA.reduce"></a>
 
 #### reduce
 
@@ -141,7 +141,7 @@ Perform Multidimensional Correspondence Analysis (MCA) on the MSA data to reduce
   msa.cleanse()
   msa.reduce(plot=True)
 
-<a id="protlearn.MSA.cluster_sequences"></a>
+<a id="msautils.MSA.cluster_sequences"></a>
 
 #### cluster\_sequences
 
@@ -175,7 +175,7 @@ Cluster the MSA data and obtain cluster labels.
   msa.cleanse()
   msa.cluster_sequences(method='single-linkage', min_clusters=3, plot=True)
 
-<a id="protlearn.MSA.generate_wordclouds"></a>
+<a id="msautils.MSA.generate_wordclouds"></a>
 
 #### generate\_wordclouds
 
@@ -209,7 +209,7 @@ Generate word cloud visualizations from protein names in a DataFrame.
   msa.cluster_sequences(method='single-linkage', min_clusters=3)
   msa.generate_wordclouds(metadata='metadata.tsv', plot=True)
 
-<a id="protlearn.MSA.select_features"></a>
+<a id="msautils.MSA.select_features"></a>
 
 #### select\_features
 
@@ -231,7 +231,7 @@ Select important features (residues) from the MSA data.
 - `save` _bool, optional_ - Whether to save feature selection results (default is False).
 - `show` _bool, optional_ - Whether to show feature selection results (default is False).
 
-<a id="protlearn.MSA.select_residues"></a>
+<a id="msautils.MSA.select_residues"></a>
 
 #### select\_residues
 
@@ -253,7 +253,7 @@ Select and store residues to be candidates for Specificity-determining Positions
 - `save` _bool, optional_ - Whether to save the selected residues (default is False).
 - `show` _bool, optional_ - Whether to show the selected residues (default is False).
 
-<a id="protlearn.MSA.generate_logos"></a>
+<a id="msautils.MSA.generate_logos"></a>
 
 #### generate\_logos
 
@@ -269,7 +269,7 @@ Generate logos from the MSA data for each cluster label.
 - `save` _bool, optional_ - Whether to save the generated logos (default is False).
 - `show` _bool, optional_ - Whether to show the generated logos (default is False).
 
-<a id="protlearn.main"></a>
+<a id="msautils.main"></a>
 
 #### main
 
